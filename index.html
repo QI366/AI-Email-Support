@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Helios Support Mailbox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+<link rel="icon" href="/static/img/favicon.svg" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand__mark" aria-hidden="true"></span>
+    <span class="brand__name">Helios</span>
+    <span class="brand__sub" data-i18n="brand_sub">Support mailbox</span>
+  </div>
+  <div class="topbar__right">
+    <div class="langsel" id="lang-select" role="group" data-i18n-label="lang_group">
+      <button type="button" data-lang="en">EN</button>
+      <button type="button" data-lang="zh">中文</button>
+      <button type="button" data-lang="es">ES</button>
+    </div>
+    <div class="whoami" id="whoami" data-i18n-title="whoami_title" title="Your mail is grouped by the IP address you connect from">
+      <span class="whoami__dot" aria-hidden="true"></span>
+      <span id="whoami-handle">identifying…</span>
+    </div>
+    <button class="btn btn--primary" id="open-compose" data-i18n="write_support">Write to support</button>
+  </div>
+</header>
+
+<main class="workspace">
+
+  <nav class="rail" aria-label="Mailboxes">
+    <div class="rail__intro">
+      <p data-i18n-html="intro_replies">Replies are written by <strong>Mira Castellanos</strong>, an AI agent working from the order record and the Helios policy set.</p>
+      <p class="rail__meta" data-i18n-html="intro_ai_addr">AI reply address: <strong>care@helios.example</strong></p>
+      <p class="rail__meta" id="model-line">model: —</p>
+    </div>
+
+    <p class="rail__label" data-i18n="rail_workspace">Workspace</p>
+    <button class="rail__item is-active" data-view="mail">
+      <span data-i18n="view_mailbox">Mailbox</span>
+    </button>
+    <button class="rail__item" data-view="policy">
+      <span data-i18n="view_policy">Policy evaluation</span><span class="rail__count" id="count-policy">0</span>
+    </button>
+    <button class="rail__item" data-view="tags">
+      <span data-i18n="view_tags">Tag analytics</span><span class="rail__count" id="count-tags">0</span>
+    </button>
+
+    <p class="rail__label rail__label--gap is-mailonly" data-i18n="mailboxes">Mailboxes</p>
+    <button class="rail__item is-active is-mailonly" data-scope="mine">
+      <span data-i18n="my_mail">My mail</span><span class="rail__count" id="count-mine">0</span>
+    </button>
+    <button class="rail__item is-mailonly" data-scope="all">
+      <span data-i18n="everyone">Everyone</span><span class="rail__count" id="count-all">0</span>
+    </button>
+
+    <p class="rail__label rail__label--gap is-mailonly" data-i18n="filter_scenario">Filter by scenario</p>
+    <div class="rail__filters is-mailonly" id="scenario-filters"></div>
+  </nav>
+
+  <section class="list" aria-label="Messages">
+    <header class="list__head">
+      <h1 id="list-title">My mail</h1>
+      <span class="list__note" id="list-note"></span>
+    </header>
+    <div class="list__scroll" id="thread-list"></div>
+  </section>
+
+  <section class="reader" id="reader" aria-label="Reading pane">
+    <article class="reader__thread" id="reader-thread" hidden></article>
+  </section>
+
+  <section class="policy" id="policy-view" data-i18n-label="view_policy">
+    <header class="policy__head">
+      <div>
+        <h1 data-i18n="policy_view_title">Policy evaluation console</h1>
+        <p data-i18n="policy_view_desc">What the policy engine computes before the model is called.</p>
+      </div>
+      <span class="policy__today" id="policy-today"></span>
+    </header>
+    <div class="policy__rules" id="policy-rules"></div>
+    <div class="policy__split">
+      <aside class="policy__nav" id="policy-nav"></aside>
+      <div class="policy__detail" id="policy-detail"></div>
+    </div>
+  </section>
+
+  <section class="tagview" id="tag-view" data-i18n-label="view_tags">
+    <header class="policy__head">
+      <div>
+        <h1 data-i18n="tags_view_title">Tag analytics</h1>
+        <p data-i18n="tags_view_desc">What the step-1 analyser made of every email in the mailbox.</p>
+      </div>
+      <div class="tagview__scope" id="tag-scope" role="group" data-i18n-label="tags_scope">
+        <button type="button" data-tagscope="all" data-i18n="everyone">Everyone</button>
+        <button type="button" data-tagscope="mine" data-i18n="my_mail">My mail</button>
+      </div>
+    </header>
+    <div class="tagview__body" id="tag-body"></div>
+  </section>
+
+</main>
+
+<!-- ---------------------------------------------------------------- compose -->
+<dialog class="sheet sheet--compose" id="compose">
+  <form method="dialog" class="sheet__close-form">
+    <button class="sheet__close" aria-label="Close">✕</button>
+  </form>
+
+  <div class="sheet__body">
+    <header class="sheet__head">
+      <h2 data-i18n="compose_title">Write to support</h2>
+      <p data-i18n="compose_desc">Pick the order you are writing about, then write your email. English or Spanish — the reply follows your language.</p>
+    </header>
+
+    <section class="step">
+      <p class="step__label"><span class="step__num">1</span> <span data-i18n="step1_text">Choose the order this email is about</span> <em data-i18n="required">(required)</em></p>
+      <div class="scenario-grid" id="scenario-grid"></div>
+    </section>
+
+    <section class="step" id="step-write">
+      <p class="step__label"><span class="step__num">2</span> <span data-i18n="step2_text">Write your email</span></p>
+      <div class="compose-fields">
+        <div class="field field--inline">
+          <label for="c-to" data-i18n="label_to">To</label>
+          <input id="c-to" value="support@helios.example" disabled />
+        </div>
+        <div class="field field--inline">
+          <label for="c-subject" data-i18n="label_subject">Subject</label>
+          <input id="c-subject" maxlength="160" data-i18n-ph="ph_subject" placeholder="What is this about?" />
+        </div>
+        <textarea id="c-body" maxlength="4000" rows="12" data-i18n-ph="ph_body" placeholder="Select an order above and we'll drop in a sample email you can edit."></textarea>
+        <div class="compose-foot">
+          <div class="compose-foot__left">
+            <span class="lang-chip" id="lang-chip" data-i18n="chip_en">Detected: English</span>
+            <button type="button" class="linkbtn" id="reset-sample" data-i18n="reset_sample">Reset to sample text</button>
+          </div>
+          <button type="button" class="btn btn--primary btn--send" id="send-mail" data-i18n="send_email" disabled>Send email</button>
+        </div>
+        <p class="compose-error" id="compose-error" hidden></p>
+      </div>
+    </section>
+  </div>
+</dialog>
+
+<!-- ---------------------------------------------------------------- details -->
+<dialog class="sheet sheet--details" id="details">
+  <form method="dialog" class="sheet__close-form">
+    <button class="sheet__close" aria-label="Close">✕</button>
+  </form>
+  <div class="sheet__body" id="details-body"></div>
+</dialog>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
