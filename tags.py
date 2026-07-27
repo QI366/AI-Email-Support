@@ -4,7 +4,7 @@ Step 1 of the two-step reply pipeline: read the email before writing to it.
     incoming email -> tags.analyse()  -> intent / sentiment / urgency / entities
                    -> prompts + llm   -> the reply the customer receives
 
-The analyser prompt lives in email_automatic_reply_en_US.jinjia2 rather than in
+The analyser prompt lives in email_automatic_reply_en_US.jinja2 rather than in
 Python so the taxonomy can be edited without touching code. That file holds both
 halves of the conversation separated by a `# User Prompt` heading: everything
 above it is the system prompt, everything below is the user turn rendered with
@@ -33,7 +33,7 @@ from jinja2 import Environment, StrictUndefined
 import llm
 
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATE_PATH = BASE_DIR / "email_automatic_reply_en_US.jinjia2"
+TEMPLATE_PATH = BASE_DIR / "email_automatic_reply_en_US.jinja2"
 
 # The heading that separates the system half of the template from the user half.
 _USER_PROMPT_MARKER = re.compile(r"^#[ \t]+User Prompt[ \t]*$", re.MULTILINE)
