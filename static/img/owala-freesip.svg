@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Owala FreeSip water bottle">
+  <rect width="240" height="240" fill="#f2f5f8"/>
+  <rect x="98" y="40" width="44" height="18" rx="6" fill="#454f5c"/>
+  <rect x="112" y="26" width="16" height="20" rx="5" fill="#2f3945"/>
+  <path d="M92 62h56a8 8 0 0 1 8 8v112a18 18 0 0 1-18 18h-44a18 18 0 0 1-18-18V70a8 8 0 0 1 8-8Z" fill="#1d4e89"/>
+  <rect x="100" y="96" width="40" height="44" rx="6" fill="#e8eef3" opacity="0.85"/>
+  <circle cx="150" cy="120" r="6" fill="#b03a28"/>
+  <text x="120" y="224" font-family="IBM Plex Mono, monospace" font-size="11" fill="#8b97a3" text-anchor="middle">24oz insulated</text>
+</svg>

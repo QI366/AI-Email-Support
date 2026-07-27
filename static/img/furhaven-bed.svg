@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Orthopedic dog bed">
+  <rect width="240" height="240" fill="#f2f5f8"/>
+  <ellipse cx="120" cy="144" rx="82" ry="46" fill="#8b97a3"/>
+  <ellipse cx="120" cy="152" rx="58" ry="30" fill="#5d6875"/>
+  <path d="M76 130q44-20 88 0" stroke="#e8eef3" stroke-width="3" fill="none" opacity="0.45"/>
+  <path d="M120 122v60" stroke="#e8eef3" stroke-width="3" opacity="0.25"/>
+  <path d="M84 152h72" stroke="#e8eef3" stroke-width="3" opacity="0.25"/>
+  <ellipse cx="120" cy="182" rx="82" ry="14" fill="#7a8794"/>
+  <text x="120" y="222" font-family="IBM Plex Mono, monospace" font-size="11" fill="#8b97a3" text-anchor="middle">orthopedic · L</text>
+</svg>

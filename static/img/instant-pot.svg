@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Instant Pot Duo Plus pressure cooker">
+  <rect width="240" height="240" fill="#f2f5f8"/>
+  <rect x="70" y="86" width="100" height="106" rx="14" fill="#cfd7de"/>
+  <rect x="82" y="104" width="76" height="44" rx="6" fill="#1a222c"/>
+  <text x="120" y="133" font-family="IBM Plex Mono, monospace" font-size="15" fill="#4ad2a5" text-anchor="middle">00:12</text>
+  <circle cx="96" cy="170" r="7" fill="#8b97a3"/><circle cx="120" cy="170" r="7" fill="#8b97a3"/><circle cx="144" cy="170" r="7" fill="#8b97a3"/>
+  <rect x="62" y="62" width="116" height="26" rx="12" fill="#e3e8ed" stroke="#c3ccd6" stroke-width="2"/>
+  <rect x="112" y="46" width="16" height="18" rx="6" fill="#b03a28"/>
+  <text x="120" y="216" font-family="IBM Plex Mono, monospace" font-size="11" fill="#8b97a3" text-anchor="middle">6 qt · 9-in-1</text>
+</svg>

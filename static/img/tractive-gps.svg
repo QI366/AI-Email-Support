@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="GPS pet tracker on a collar">
+  <rect width="240" height="240" fill="#f2f5f8"/>
+  <rect x="30" y="80" width="180" height="28" rx="14" fill="#b03a28"/>
+  <rect x="30" y="89" width="180" height="10" fill="#8f2f20"/>
+  <rect x="92" y="106" width="56" height="66" rx="16" fill="#232c36"/>
+  <circle cx="120" cy="134" r="14" fill="#1d5d4c"/>
+  <circle cx="120" cy="134" r="5" fill="#e8eef3"/>
+  <rect x="104" y="154" width="32" height="5" rx="2.5" fill="#6c7887"/>
+  <path d="M150 118a26 26 0 0 1 0 32" stroke="#8b97a3" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M90 118a26 26 0 0 0 0 32" stroke="#8b97a3" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <text x="120" y="222" font-family="IBM Plex Mono, monospace" font-size="11" fill="#8b97a3" text-anchor="middle">GPS · LTE collar tag</text>
+</svg>

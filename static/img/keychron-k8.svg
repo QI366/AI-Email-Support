@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Keychron K8 mechanical keyboard">
+  <rect width="240" height="240" fill="#f2f5f8"/>
+  <rect x="30" y="86" width="180" height="74" rx="10" fill="#2f3945"/>
+  <rect x="30" y="86" width="180" height="12" rx="6" fill="#454f5c"/>
+  <g fill="#f2f5f8">
+    <rect x="42" y="106" width="12" height="12" rx="2"/>
+    <rect x="58" y="106" width="12" height="12" rx="2"/>
+    <rect x="74" y="106" width="12" height="12" rx="2"/>
+    <rect x="90" y="106" width="12" height="12" rx="2"/>
+    <rect x="106" y="106" width="12" height="12" rx="2"/>
+    <rect x="122" y="106" width="12" height="12" rx="2"/>
+    <rect x="138" y="106" width="12" height="12" rx="2"/>
+    <rect x="154" y="106" width="12" height="12" rx="2"/>
+    <rect x="170" y="106" width="12" height="12" rx="2"/>
+    <rect x="186" y="106" width="12" height="12" rx="2"/>
+    <rect x="42" y="122" width="12" height="12" rx="2"/>
+    <rect x="58" y="122" width="12" height="12" rx="2"/>
+    <rect x="74" y="122" width="12" height="12" rx="2"/>
+    <rect x="90" y="122" width="12" height="12" rx="2"/>
+    <rect x="106" y="122" width="12" height="12" rx="2"/>
+    <rect x="122" y="122" width="12" height="12" rx="2"/>
+    <rect x="138" y="122" width="12" height="12" rx="2"/>
+    <rect x="154" y="122" width="12" height="12" rx="2"/>
+    <rect x="170" y="122" width="28" height="12" rx="2"/>
+  </g>
+  <rect x="42" y="138" width="12" height="12" rx="2" fill="#b03a28"/>
+  <rect x="70" y="138" width="100" height="12" rx="6" fill="#f2f5f8"/>
+  <text x="120" y="200" font-family="IBM Plex Mono, monospace" font-size="11" fill="#8b97a3" text-anchor="middle">hot-swappable</text>
+</svg>

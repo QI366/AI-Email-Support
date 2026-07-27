@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Dog harness with D-ring">
+  <rect width="240" height="240" fill="#f2f5f8"/>
+  <circle cx="120" cy="54" r="11" fill="none" stroke="#8b97a3" stroke-width="6"/>
+  <rect x="112" y="62" width="16" height="18" rx="4" fill="#6c7887"/>
+  <path d="M84 76h72a12 12 0 0 1 12 12v54a12 12 0 0 1-12 12H84a12 12 0 0 1-12-12V88a12 12 0 0 1 12-12Z" fill="#1d5d4c"/>
+  <rect x="72" y="100" width="96" height="11" fill="#154334"/>
+  <rect x="88" y="124" width="64" height="7" rx="3.5" fill="#e8eef3" opacity="0.6"/>
+  <rect x="66" y="166" width="108" height="16" rx="8" fill="#454f5c"/>
+  <rect x="108" y="162" width="24" height="24" rx="6" fill="#b03a28"/>
+  <text x="120" y="222" font-family="IBM Plex Mono, monospace" font-size="11" fill="#8b97a3" text-anchor="middle">size L · reflective</text>
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Levoit Core 300 air purifier">
+  <rect width="240" height="240" fill="#f2f5f8"/>
+  <rect x="80" y="52" width="80" height="146" rx="16" fill="#e8ecf0" stroke="#c3ccd6" stroke-width="2"/>
+  <ellipse cx="120" cy="62" rx="26" ry="9" fill="#d5dce3"/>
+  <circle cx="120" cy="62" r="4" fill="#1d5d4c"/>
+  <g fill="#c3ccd6">
+    <rect x="92" y="92" width="56" height="4" rx="2"/><rect x="92" y="104" width="56" height="4" rx="2"/>
+    <rect x="92" y="116" width="56" height="4" rx="2"/><rect x="92" y="128" width="56" height="4" rx="2"/>
+    <rect x="92" y="140" width="56" height="4" rx="2"/><rect x="92" y="152" width="56" height="4" rx="2"/>
+    <rect x="92" y="164" width="56" height="4" rx="2"/>
+  </g>
+  <text x="120" y="220" font-family="IBM Plex Mono, monospace" font-size="11" fill="#8b97a3" text-anchor="middle">H13 True HEPA</text>
+</svg>
