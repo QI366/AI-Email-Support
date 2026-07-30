@@ -53,6 +53,7 @@ def _connect() -> sqlite3.Connection:
 # existing table alone, so they have to be patched in explicitly.
 _ADDED_COLUMNS = {
     "tags_json": "TEXT",
+    "reply_source": "TEXT",  # 'ai' | 'manual' — who actually wrote reply_body
 }
 
 
@@ -99,8 +100,21 @@ def finish_thread(
     with _lock, _connect() as conn:
         conn.execute(
             """UPDATE threads SET status=?, reply_subject=?, reply_body=?, reply_language=?,
-                   model=?, latency_ms=?, error=? WHERE id=?""",
+                   model=?, latency_ms=?, error=?, reply_source='ai' WHERE id=?""",
             (status, reply_subject, reply_body, reply_language, model, latency_ms, error, thread_id),
+        )
+
+
+def set_manual_reply(thread_id: int, *, reply_subject: str, reply_body: str, reply_language: str) -> None:
+    """A human agent's reply overrides whatever Step 2 produced (or failed to
+    produce). Always lands the thread in 'replied', even one Step 2 marked
+    'failed' — that is the whole point of the manual escape hatch.
+    """
+    with _lock, _connect() as conn:
+        conn.execute(
+            """UPDATE threads SET status='replied', reply_subject=?, reply_body=?,
+                   reply_language=?, reply_source='manual', error=NULL WHERE id=?""",
+            (reply_subject, reply_body, reply_language, thread_id),
         )
 
 
@@ -130,6 +144,7 @@ def _row_to_dict(row: sqlite3.Row, *, full: bool) -> dict[str, Any]:
         "created_at": row["created_at"],
         "preview": (body[:140] + "…") if len(body) > 140 else body,
         "tags": tags if full else _compact_tags(tags),
+        "reply_source": row["reply_source"] or "ai",
     }
     if full:
         out["body"] = body

@@ -932,6 +932,473 @@ SCENARIOS: list[dict[str, Any]] = [
             "condition_reported": "opened_no_defect",
         },
     },
+    # --- QA: one scenario per human-review rule, for manually verifying ------
+    # tags._apply_review_rules(). Each blurb names the rule it's meant to trip
+    # so you know what to expect before you send it. Not real catalog data —
+    # safe to delete once you're done testing.
+    {
+        "scenario_id": "qa_account_hacked",
+        "title": "[QA] Fraud keywords + sensitive intent",
+        "blurb": "Should trip the fraud-keyword rule ('hacked', 'unauthorized charge') and likely classify as account_security, a rule-B sensitive intent.",
+        "image": "/static/img/mx-master.svg",
+        "customer": {"name": "Jamie Chen", "email": "jamie.chen@example.com", "tier": "standard"},
+        "suggested_subject": "Unauthorized charge - I never placed this order",
+        "suggested_body": (
+            "Hi,\n\n"
+            "I just found a charge on my card for an order I never placed. I think someone hacked "
+            "into my account and used my saved payment method. Please cancel this order immediately "
+            "and secure my account.\n\n"
+            "Jamie"
+        ),
+        "product": {
+            "product_id": "QA-HACK-01",
+            "product_name": "Logitech MX Master 3S Wireless Mouse (Graphite)",
+            "category": "Electronics",
+            "sub_category": "Computer Mice",
+            "brand": "Logitech",
+            "price": 99.99,
+            "original_price": 119.99,
+            "currency": "USD",
+            "sales_volume": 15400,
+            "rating": 4.7,
+            "review_count": 18902,
+            "stock_status": "in_stock",
+            "description": "8K DPI quiet-click wireless mouse with MagSpeed scrolling.",
+            "key_features": ["8,000 DPI", "Quiet Click buttons", "MagSpeed scroll wheel"],
+            "image_url": "/static/img/mx-master.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90001",
+            "product_id": "QA-HACK-01",
+            "order_status": "paid_unshipped",
+            "order_date_offset": 0,
+            "payment_status": "paid",
+            "shipping_carrier": None,
+            "tracking_number": None,
+            "estimated_delivery_offset": 4,
+            "delivered_date_offset": None,
+            "shipping_address": "500 Test Ave, Testville, CA 90000, US",
+            "quantity": 1,
+            "amount_paid": 99.99,
+        },
+    },
+    {
+        "scenario_id": "qa_angry_legal_threat",
+        "title": "[QA] Legal keywords + angry/critical",
+        "blurb": "Should trip the legal-keyword rule ('lawyer', 'chargeback') and the sentiment+urgency rule (angry + critical).",
+        "image": "/static/img/eufy-vacuum.svg",
+        "customer": {"name": "Robert Klein", "email": "robert.klein@example.com", "tier": "standard"},
+        "suggested_subject": "This is unacceptable - contacting my lawyer",
+        "suggested_body": (
+            "This is the third time this vacuum has broken down and nobody has actually fixed "
+            "anything. I am absolutely furious about how this has been handled. If this isn't "
+            "resolved today I am filing a chargeback with my bank and speaking to my lawyer about "
+            "this. This is completely unacceptable.\n\n"
+            "Robert"
+        ),
+        "product": {
+            "product_id": "QA-LEGAL-01",
+            "product_name": "eufy RoboVac 11S Max Robot Vacuum",
+            "category": "Home & Kitchen",
+            "sub_category": "Robot Vacuums",
+            "brand": "eufy",
+            "price": 199.99,
+            "original_price": 249.99,
+            "currency": "USD",
+            "sales_volume": 7400,
+            "rating": 4.5,
+            "review_count": 29800,
+            "stock_status": "in_stock",
+            "description": "Slim 2000Pa robot vacuum with BoostIQ and 100-minute runtime.",
+            "key_features": ["2000Pa suction", "100-minute runtime", "Slim body"],
+            "image_url": "/static/img/eufy-vacuum.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90002",
+            "product_id": "QA-LEGAL-01",
+            "order_status": "delivered",
+            "order_date_offset": -40,
+            "payment_status": "paid",
+            "shipping_carrier": "FedEx",
+            "tracking_number": "770199001122",
+            "estimated_delivery_offset": -35,
+            "delivered_date_offset": -35,
+            "shipping_address": "9 Belmont Rd, Austin, TX 78704, US",
+            "quantity": 1,
+            "amount_paid": 199.99,
+        },
+    },
+    {
+        "scenario_id": "qa_product_fire_hazard",
+        "title": "[QA] Product-safety keywords",
+        "blurb": "Should trip the safety-keyword rule ('smoke', 'burning') — a product-safety incident.",
+        "image": "/static/img/anker737.svg",
+        "customer": {"name": "Nina Popov", "email": "nina.popov@example.com", "tier": "standard"},
+        "suggested_subject": "Power bank got hot and started smoking",
+        "suggested_body": (
+            "Hi,\n\n"
+            "I was charging my phone overnight with this power bank and woke up to a strange "
+            "smell - it was hot to the touch and there was smoke coming from one corner. I "
+            "unplugged it right away. It smelled like something was burning and this feels like a "
+            "real fire hazard.\n\n"
+            "Nina"
+        ),
+        "product": {
+            "product_id": "QA-FIRE-01",
+            "product_name": "Anker 737 Power Bank (PowerCore 24K)",
+            "category": "Electronics",
+            "sub_category": "Portable Chargers",
+            "brand": "Anker",
+            "price": 89.99,
+            "original_price": 109.99,
+            "currency": "USD",
+            "sales_volume": 4300,
+            "rating": 4.7,
+            "review_count": 6821,
+            "stock_status": "in_stock",
+            "description": "24,000mAh power bank with 140W output.",
+            "key_features": ["140W max output", "Digital display", "Fast charging"],
+            "image_url": "/static/img/anker737.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90003",
+            "product_id": "QA-FIRE-01",
+            "order_status": "delivered",
+            "order_date_offset": -5,
+            "payment_status": "paid",
+            "shipping_carrier": "UPS",
+            "tracking_number": "1Z999AA10900003331",
+            "estimated_delivery_offset": -4,
+            "delivered_date_offset": -4,
+            "shipping_address": "77 Maple Street, Portland, OR 97205, US",
+            "quantity": 1,
+            "amount_paid": 89.99,
+        },
+    },
+    {
+        "scenario_id": "qa_request_manager",
+        "title": "[QA] Explicit request for a human",
+        "blurb": "Should trip the human-escalation-keyword rule ('speak to a manager', 'real person').",
+        "image": "/static/img/keychron-k8.svg",
+        "customer": {"name": "Sam Osei", "email": "sam.osei@example.com", "tier": "standard"},
+        "suggested_subject": "I need to speak to a manager",
+        "suggested_body": (
+            "I've emailed twice already about my missing keyboard order and just gotten generic "
+            "replies. I don't want another automated response - I want to speak to a manager or a "
+            "real person who can actually resolve this.\n\n"
+            "Sam"
+        ),
+        "product": {
+            "product_id": "QA-ESC-01",
+            "product_name": "Keychron K8 Wireless Mechanical Keyboard",
+            "category": "Electronics",
+            "sub_category": "Keyboards",
+            "brand": "Keychron",
+            "price": 89.00,
+            "original_price": 99.00,
+            "currency": "USD",
+            "sales_volume": 8100,
+            "rating": 4.7,
+            "review_count": 12440,
+            "stock_status": "in_stock",
+            "description": "Tenkeyless hot-swappable mechanical keyboard.",
+            "key_features": ["Hot-swappable switches", "Bluetooth 5.1", "240h battery"],
+            "image_url": "/static/img/keychron-k8.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90004",
+            "product_id": "QA-ESC-01",
+            "order_status": "in_transit",
+            "order_date_offset": -6,
+            "payment_status": "paid",
+            "shipping_carrier": "USPS",
+            "tracking_number": "9400111899223190004",
+            "estimated_delivery_offset": -1,
+            "delivered_date_offset": None,
+            "last_tracking_scan_offset": -2,
+            "last_tracking_event": "In transit - regional hub",
+            "shipping_address": "215 Birch Ave, Apt 2, Seattle, WA 98103, US",
+            "quantity": 1,
+            "amount_paid": 89.00,
+        },
+    },
+    {
+        "scenario_id": "qa_social_media_threat",
+        "title": "[QA] Reputation-risk keywords",
+        "blurb": "Should trip the reputation-keyword rule ('social media', 'leave a bad review').",
+        "image": "/static/img/owala-freesip.svg",
+        "customer": {"name": "Casey Fields", "email": "casey.fields@example.com", "tier": "standard"},
+        "suggested_subject": "Not happy - going to post about this",
+        "suggested_body": (
+            "This bottle arrived leaking and customer service has ignored my last email for a "
+            "week. If this isn't fixed I'm going to post about it on social media and leave a bad "
+            "review everywhere I can find. Other customers deserve to know.\n\n"
+            "Casey"
+        ),
+        "product": {
+            "product_id": "QA-REP-01",
+            "product_name": "Owala FreeSip Insulated Water Bottle 24 oz",
+            "category": "Home & Kitchen",
+            "sub_category": "Water Bottles",
+            "brand": "Owala",
+            "price": 27.99,
+            "original_price": 32.99,
+            "currency": "USD",
+            "sales_volume": 33800,
+            "rating": 4.8,
+            "review_count": 62110,
+            "stock_status": "in_stock",
+            "description": "Double-wall stainless steel bottle with a FreeSip spout.",
+            "key_features": ["FreeSip spout", "Cold 24 hours", "Push-button lid"],
+            "image_url": "/static/img/owala-freesip.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90005",
+            "product_id": "QA-REP-01",
+            "order_status": "delivered",
+            "order_date_offset": -8,
+            "payment_status": "paid",
+            "shipping_carrier": "USPS",
+            "tracking_number": "9400111899223190005",
+            "estimated_delivery_offset": -6,
+            "delivered_date_offset": -6,
+            "shipping_address": "Calle Luna 27, 2A, 41010 Sevilla, ES",
+            "quantity": 1,
+            "amount_paid": 27.99,
+        },
+    },
+    {
+        "scenario_id": "qa_privacy_delete_request",
+        "title": "[QA] Privacy/compliance keywords",
+        "blurb": "Should trip the privacy-keyword rule ('GDPR', 'delete my data').",
+        "image": "/static/img/kindle-paperwhite.svg",
+        "customer": {"name": "Priya Desai", "email": "priya.desai@example.com", "tier": "standard"},
+        "suggested_subject": "GDPR request - please delete my data",
+        "suggested_body": (
+            "Hello,\n\n"
+            "Under GDPR I am formally requesting that you delete my data from your systems "
+            "entirely, including my order history, account details, and any saved payment "
+            "information.\n\n"
+            "Priya"
+        ),
+        "product": {
+            "product_id": "QA-PRIV-01",
+            "product_name": "Kindle Paperwhite (16 GB, 6.8\" display)",
+            "category": "Electronics",
+            "sub_category": "E-readers",
+            "brand": "Amazon",
+            "price": 149.99,
+            "original_price": 159.99,
+            "currency": "USD",
+            "sales_volume": 26500,
+            "rating": 4.7,
+            "review_count": 51230,
+            "stock_status": "in_stock",
+            "description": "6.8-inch glare-free e-reader with adjustable warm light.",
+            "key_features": ["6.8\" display", "IPX8 waterproof", "Weeks of battery"],
+            "image_url": "/static/img/kindle-paperwhite.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90006",
+            "product_id": "QA-PRIV-01",
+            "order_status": "delivered",
+            "order_date_offset": -20,
+            "payment_status": "paid",
+            "shipping_carrier": "FedEx",
+            "tracking_number": "612093847790006",
+            "estimated_delivery_offset": -18,
+            "delivered_date_offset": -18,
+            "shipping_address": "215 Birch Ave, Apt 2, Seattle, WA 98103, US",
+            "quantity": 1,
+            "amount_paid": 149.99,
+        },
+    },
+    {
+        "scenario_id": "qa_high_value_order",
+        "title": "[QA] High order value",
+        "blurb": "Should trip the high-order-value rule ($999 >= $300 threshold) — otherwise a routine, low-drama shipping question.",
+        "image": "/static/img/lg-monitor.svg",
+        "customer": {"name": "Victor Huang", "email": "victor.huang@example.com", "tier": "standard"},
+        "suggested_subject": "Just checking on my monitor's delivery",
+        "suggested_body": (
+            "Hi,\n\n"
+            "I ordered this monitor three days ago and tracking still shows it in transit. No "
+            "rush at all, just wondering roughly when it's expected to arrive.\n\n"
+            "Victor"
+        ),
+        "product": {
+            "product_id": "QA-HIGHVAL-01",
+            "product_name": "LG 27GR95QE-B 27\" OLED Gaming Monitor",
+            "category": "Electronics",
+            "sub_category": "Monitors",
+            "brand": "LG",
+            "price": 999.00,
+            "original_price": 1199.00,
+            "currency": "USD",
+            "sales_volume": 1900,
+            "rating": 4.6,
+            "review_count": 3120,
+            "stock_status": "in_stock",
+            "description": "27-inch OLED gaming monitor with 240Hz refresh and 0.03ms response.",
+            "key_features": ["OLED panel", "240Hz refresh", "0.03ms response"],
+            "image_url": "/static/img/lg-monitor.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90007",
+            "product_id": "QA-HIGHVAL-01",
+            "order_status": "in_transit",
+            "order_date_offset": -3,
+            "payment_status": "paid",
+            "shipping_carrier": "UPS",
+            "tracking_number": "1Z999AA10900007771",
+            "estimated_delivery_offset": 2,
+            "delivered_date_offset": None,
+            "last_tracking_scan_offset": -1,
+            "last_tracking_event": "In transit - regional hub",
+            "shipping_address": "640 Oak Ridge Dr, Denver, CO 80220, US",
+            "quantity": 1,
+            "amount_paid": 999.00,
+        },
+    },
+    {
+        "scenario_id": "qa_vip_unhappy",
+        "title": "[QA] VIP member + negative sentiment",
+        "blurb": "Should trip the Helios Plus + negative-sentiment rule — order value stays low on purpose so it doesn't also trip the high-value rule.",
+        "image": "/static/img/instant-pot.svg",
+        "customer": {"name": "Helena Ward", "email": "helena.ward@example.com", "tier": "helios_plus"},
+        "suggested_subject": "Second defective item in a row - very frustrated",
+        "suggested_body": (
+            "I've been a Helios Plus member for two years and this is the second defective item "
+            "I've received in a row. I'm extremely frustrated and honestly considering cancelling "
+            "my membership over this.\n\n"
+            "Helena"
+        ),
+        "product": {
+            "product_id": "QA-VIP-01",
+            "product_name": "Instant Pot Duo Plus 6 Qt Pressure Cooker",
+            "category": "Home & Kitchen",
+            "sub_category": "Pressure Cookers",
+            "brand": "Instant Pot",
+            "price": 79.99,
+            "original_price": 99.99,
+            "currency": "USD",
+            "sales_volume": 18700,
+            "rating": 4.6,
+            "review_count": 45900,
+            "stock_status": "in_stock",
+            "description": "9-in-1 electric pressure cooker with 15 programs.",
+            "key_features": ["9 appliances in one", "15 programs", "Stainless steel pot"],
+            "image_url": "/static/img/instant-pot.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90008",
+            "product_id": "QA-VIP-01",
+            "order_status": "delivered",
+            "order_date_offset": -10,
+            "payment_status": "paid",
+            "shipping_carrier": "UPS",
+            "tracking_number": "1Z999AA10900008881",
+            "estimated_delivery_offset": -8,
+            "delivered_date_offset": -8,
+            "shipping_address": "Av. Diagonal 402, 08037 Barcelona, ES",
+            "quantity": 1,
+            "amount_paid": 79.99,
+        },
+    },
+    {
+        "scenario_id": "qa_damage_reported_late",
+        "title": "[QA] Damage reported outside the 2-day window",
+        "blurb": "Should trip the damage-report-window rule — condition is damaged_in_transit but reported 10 days after delivery, past the 2-day window.",
+        "image": "/static/img/petlibro-fountain.svg",
+        "customer": {"name": "Derek Simmons", "email": "derek.simmons@example.com", "tier": "standard"},
+        "suggested_subject": "Sorry for the late report - arrived cracked",
+        "suggested_body": (
+            "Hi,\n\n"
+            "I meant to email about this sooner, but the water fountain arrived with a cracked "
+            "reservoir about a week and a half ago and I only just got around to reporting it. Is "
+            "a replacement still possible at this point?\n\n"
+            "Derek"
+        ),
+        "product": {
+            "product_id": "QA-LATEDMG-01",
+            "product_name": "PETLIBRO Granary Stainless Steel Cat Water Fountain 2.5 L",
+            "category": "Pet Supplies",
+            "sub_category": "Cat Water Fountains",
+            "brand": "PETLIBRO",
+            "price": 45.99,
+            "original_price": 59.99,
+            "currency": "USD",
+            "sales_volume": 8900,
+            "rating": 4.6,
+            "review_count": 19870,
+            "stock_status": "in_stock",
+            "description": "2.5-litre stainless steel pet fountain with a triple-layer filter.",
+            "key_features": ["Stainless steel", "Triple-layer filter", "Under 40 dB pump"],
+            "image_url": "/static/img/petlibro-fountain.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90009",
+            "product_id": "QA-LATEDMG-01",
+            "order_status": "delivered",
+            "order_date_offset": -12,
+            "payment_status": "paid",
+            "shipping_carrier": "FedEx",
+            "tracking_number": "394471028900009",
+            "estimated_delivery_offset": -10,
+            "delivered_date_offset": -10,
+            "shipping_address": "18 Harborview Rd, Providence, RI 02903, US",
+            "quantity": 1,
+            "amount_paid": 45.99,
+            "condition_reported": "damaged_in_transit",
+        },
+    },
+    {
+        "scenario_id": "qa_warranty_and_return_expired",
+        "title": "[QA] Past both return window and warranty",
+        "blurb": "Should trip the expired-warranty rule — delivered over 400 days ago, so both the 30-day return window and the 12-month warranty have lapsed.",
+        "image": "/static/img/tractive-gps.svg",
+        "customer": {"name": "Louisa Ferreira", "email": "louisa.ferreira@example.com", "tier": "standard"},
+        "suggested_subject": "Battery completely dead after over a year",
+        "suggested_body": (
+            "Hello,\n\n"
+            "This GPS tracker's battery has completely stopped holding a charge. I've had it for "
+            "a little over a year now, so I know it's well past the return window, but I was "
+            "hoping something could still be done.\n\n"
+            "Louisa"
+        ),
+        "product": {
+            "product_id": "QA-OLDWARR-01",
+            "product_name": "Tractive GPS DOG 4 Tracker",
+            "category": "Pet Supplies",
+            "sub_category": "Pet GPS Trackers",
+            "brand": "Tractive",
+            "price": 49.99,
+            "original_price": 59.99,
+            "currency": "USD",
+            "sales_volume": 11200,
+            "rating": 4.3,
+            "review_count": 15880,
+            "stock_status": "in_stock",
+            "description": "LTE collar tracker with live location and virtual fence alerts.",
+            "key_features": ["Live GPS tracking", "Virtual fence alerts", "Waterproof"],
+            "image_url": "/static/img/tractive-gps.svg",
+        },
+        "order_template": {
+            "order_id": "HS-90010",
+            "product_id": "QA-OLDWARR-01",
+            "order_status": "delivered",
+            "order_date_offset": -400,
+            "payment_status": "paid",
+            "shipping_carrier": "USPS",
+            "tracking_number": "9400111899223190010",
+            "estimated_delivery_offset": -395,
+            "delivered_date_offset": -395,
+            "shipping_address": "52 Larkspur Ct, Boise, ID 83702, US",
+            "quantity": 1,
+            "amount_paid": 49.99,
+            "condition_reported": "battery_failure",
+        },
+    },
 ]
 
 SCENARIOS_BY_ID = {s["scenario_id"]: s for s in SCENARIOS}
