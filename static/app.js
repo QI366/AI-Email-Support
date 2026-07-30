@@ -114,6 +114,17 @@ const I18N = {
     tag_urgency: 'Urgency',
     tag_language: 'Detected language',
     tag_entities: 'Key entities',
+    tag_ambiguity: 'Ambiguity',
+    tag_evidence: 'Evidence',
+    tag_alternatives: 'Alternative intents',
+    tag_review_reasons: 'Review reasons',
+    needs_review_flag: 'Flagged for human review',
+    tag_review_breakdown: 'Review verdict',
+    verdict_model: 'AI model',
+    verdict_rules: 'Rule engine',
+    verdict_yes: 'Needs review',
+    verdict_no: 'No review needed',
+    no_reasons_recorded: '(no specific reason recorded)',
     confidence: (v) => `confidence ${v}`,
     entity_product_mentioned: 'Product mentioned',
     entity_issue_mentioned: 'Issue mentioned',
@@ -171,6 +182,13 @@ const I18N = {
     toast_open_fail: (msg) => `Could not open that message: ${msg}`,
     toast_load_fail: (msg) => `Could not load the mailbox: ${msg}`,
     toast_no_api: 'No API key loaded. Add MODEL_OPENAI_API_KEY to .env and restart.',
+    cancel: 'Cancel',
+    manual_reply_btn: 'Reply manually',
+    manual_reply_send: 'Send manual reply',
+    manual_reply_sent: 'Manual reply sent.',
+    manual_reply_tag: 'Manual reply',
+    err_write_reply: 'Write a reply before sending.',
+    toast_manual_fail: (msg) => `Could not send the manual reply: ${msg}`,
     status_pre_order_inquiry: 'no order yet',
     status_paid_unshipped: 'awaiting shipment',
     status_in_transit: 'in transit',
@@ -262,6 +280,17 @@ const I18N = {
     tag_urgency: '紧急度',
     tag_language: '识别语言',
     tag_entities: '关键信息',
+    tag_ambiguity: '歧义程度',
+    tag_evidence: '判断依据',
+    tag_alternatives: '备选意图',
+    tag_review_reasons: '复核原因',
+    needs_review_flag: '已标记为需要人工复核',
+    tag_review_breakdown: '复核判定',
+    verdict_model: 'AI 模型',
+    verdict_rules: '规则引擎',
+    verdict_yes: '需要复核',
+    verdict_no: '无需复核',
+    no_reasons_recorded: '（未记录具体原因）',
     confidence: (v) => `置信度 ${v}`,
     entity_product_mentioned: '提到的商品',
     entity_issue_mentioned: '提到的问题',
@@ -319,6 +348,13 @@ const I18N = {
     toast_open_fail: (msg) => `无法打开该邮件：${msg}`,
     toast_load_fail: (msg) => `无法加载邮箱：${msg}`,
     toast_no_api: '未加载 API 密钥。请在 .env 中添加 MODEL_OPENAI_API_KEY 后重启。',
+    cancel: '取消',
+    manual_reply_btn: '人工回复',
+    manual_reply_send: '发送人工回复',
+    manual_reply_sent: '人工回复已发送。',
+    manual_reply_tag: '人工回复',
+    err_write_reply: '发送前请先写下回复内容。',
+    toast_manual_fail: (msg) => `人工回复发送失败：${msg}`,
     status_pre_order_inquiry: '下单前咨询',
     status_paid_unshipped: '已付款未发货',
     status_in_transit: '运输中',
@@ -410,6 +446,17 @@ const I18N = {
     tag_urgency: 'Urgencia',
     tag_language: 'Idioma detectado',
     tag_entities: 'Entidades clave',
+    tag_ambiguity: 'Ambigüedad',
+    tag_evidence: 'Evidencia',
+    tag_alternatives: 'Intenciones alternativas',
+    tag_review_reasons: 'Motivos de revisión',
+    needs_review_flag: 'Marcado para revisión humana',
+    tag_review_breakdown: 'Veredicto de revisión',
+    verdict_model: 'Modelo IA',
+    verdict_rules: 'Motor de reglas',
+    verdict_yes: 'Requiere revisión',
+    verdict_no: 'No requiere revisión',
+    no_reasons_recorded: '(sin motivo específico registrado)',
     confidence: (v) => `confianza ${v}`,
     entity_product_mentioned: 'Producto mencionado',
     entity_issue_mentioned: 'Problema mencionado',
@@ -467,6 +514,13 @@ const I18N = {
     toast_open_fail: (msg) => `No se pudo abrir ese mensaje: ${msg}`,
     toast_load_fail: (msg) => `No se pudo cargar el buzón: ${msg}`,
     toast_no_api: 'No hay clave de API cargada. Añada MODEL_OPENAI_API_KEY a .env y reinicie.',
+    cancel: 'Cancelar',
+    manual_reply_btn: 'Responder manualmente',
+    manual_reply_send: 'Enviar respuesta manual',
+    manual_reply_sent: 'Respuesta manual enviada.',
+    manual_reply_tag: 'Respuesta manual',
+    err_write_reply: 'Escriba una respuesta antes de enviarla.',
+    toast_manual_fail: (msg) => `No se pudo enviar la respuesta manual: ${msg}`,
     status_pre_order_inquiry: 'sin pedido',
     status_paid_unshipped: 'pendiente de envío',
     status_in_transit: 'en tránsito',
@@ -571,6 +625,12 @@ const TAG_LABELS = {
     en:    { en: 'English', zh: '英语', es: 'Inglés' },
     es:    { en: 'Spanish', zh: '西班牙语', es: 'Español' },
     other: { en: 'Other', zh: '其他', es: 'Otro' },
+  },
+  ambiguity: {
+    clear:    { en: 'Clear', zh: '明确', es: 'Clara' },
+    moderate: { en: 'Moderate', zh: '轻度', es: 'Moderada' },
+    high:     { en: 'High', zh: '较高', es: 'Alta' },
+    critical: { en: 'Critical', zh: '严重', es: 'Crítica' },
   },
 };
 
@@ -911,6 +971,8 @@ function renderThread(t) {
   rFrom.append(el('span', null, 'Helios Customer Care · care@helios.example'));
   rHead.append(rFrom);
   if (t.reply_language) rHead.append(el('div', 'msg__when', t.reply_language === 'es' ? tr('lang_es') : tr('lang_en')));
+  // A human agent's override is marked distinctly from the AI's own draft
+  if (t.reply_source === 'manual') rHead.append(el('span', 'tag tag--manual', tr('manual_reply_tag')));
   reply.append(rHead);
 
   if (t.status === 'replied') {
@@ -931,8 +993,87 @@ function renderThread(t) {
   }
   wrap.append(reply);
 
+  /* human-in-the-loop escape hatch: available regardless of status, so an
+     agent can override a bad AI draft or supply the reply Step 2 never
+     managed to write. Always visible — not gated on needs_review — since
+     the analyser's flag is only a hint, not a hard gate. */
+  wrap.append(manualReplyPanel(t));
+
   box.append(wrap);
   $('#reader').scrollTop = 0;
+}
+
+function manualReplyPanel(t) {
+  const wrap = el('div', 'manual-reply');
+  const needsReview = !!(t.tags && t.tags.needs_review);
+
+  const toggle = el('button', 'btn' + (needsReview ? ' btn--flagged' : ''), tr('manual_reply_btn'));
+  toggle.type = 'button';
+  wrap.append(toggle);
+
+  const form = el('div', 'compose-fields manual-reply__form');
+  form.hidden = true;
+
+  const subjectField = el('div', 'field field--inline');
+  subjectField.append(el('label', null, tr('label_subject')));
+  const subjectInput = document.createElement('input');
+  subjectInput.value = t.reply_subject || '';
+  subjectField.append(subjectInput);
+  form.append(subjectField);
+
+  // Pre-filled with whatever reply already exists (AI draft, or nothing if
+  // Step 2 failed) so the agent edits rather than starts from a blank page.
+  const textarea = document.createElement('textarea');
+  textarea.rows = 8;
+  textarea.value = t.reply_body || '';
+  form.append(textarea);
+
+  const foot = el('div', 'compose-foot');
+  const cancelBtn = el('button', 'btn', tr('cancel'));
+  cancelBtn.type = 'button';
+  const sendBtn = el('button', 'btn btn--primary', tr('manual_reply_send'));
+  sendBtn.type = 'button';
+  foot.append(el('div', 'compose-foot__left'), sendBtn);
+  foot.firstChild.append(cancelBtn);
+  form.append(foot);
+
+  const errBox = el('p', 'compose-error');
+  errBox.hidden = true;
+  form.append(errBox);
+
+  wrap.append(form);
+
+  toggle.addEventListener('click', () => {
+    form.hidden = !form.hidden;
+    if (!form.hidden) textarea.focus();
+  });
+  cancelBtn.addEventListener('click', () => { form.hidden = true; });
+
+  sendBtn.addEventListener('click', async () => {
+    const body = textarea.value.trim();
+    errBox.hidden = true;
+    if (!body) { errBox.textContent = tr('err_write_reply'); errBox.hidden = false; return; }
+
+    sendBtn.disabled = true;
+    sendBtn.textContent = tr('sending');
+    try {
+      const updated = await api(`/api/threads/${t.id}/manual-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: subjectInput.value, body }),
+      });
+      renderThread(updated);
+      refreshThreads();
+      toast(tr('manual_reply_sent'));
+    } catch (err) {
+      errBox.textContent = tr('toast_manual_fail', err.message);
+      errBox.hidden = false;
+      sendBtn.disabled = false;
+      sendBtn.textContent = tr('manual_reply_send');
+    }
+  });
+
+  return wrap;
 }
 
 function tagChip(group, value, confidence) {
@@ -967,7 +1108,12 @@ function analysisCard(tags) {
   chips.append(tagChip('sentiment', tags.sentiment, tags.sentiment_confidence));
   chips.append(tagChip('urgency', tags.urgency));
   chips.append(tagChip('language', tags.language));
+  // 歧义程度是新增的诊断字段，作为第五个 chip 展示
+  if (tags.ambiguity_level) chips.append(tagChip('ambiguity', tags.ambiguity_level));
   card.append(chips);
+
+  // needs_review 为 true 时给一条醒目提示，让复核人员一眼看到这封邮件被模型标记为需要人工介入
+  if (tags.needs_review) card.append(el('p', 'analysis__flag', tr('needs_review_flag')));
 
   if (tags.summary) card.append(el('p', 'analysis__summary', tags.summary));
 
@@ -981,7 +1127,70 @@ function analysisCard(tags) {
     card.append(panel);
   }
 
+  // evidence：模型引用的原文片段，用来说明它为什么判定为这个 intent
+  if (Array.isArray(tags.evidence) && tags.evidence.length) {
+    const panel = el('div', 'panel');
+    panel.append(el('div', 'panel__head', tr('tag_evidence')));
+    const ul = el('ul', 'features');
+    tags.evidence.forEach((line) => ul.append(el('li', null, line)));
+    panel.append(ul);
+    card.append(panel);
+  }
+
+  // alternative_intents：模型认为也有可能成立的备选意图，附带各自的置信度和理由
+  if (Array.isArray(tags.alternative_intents) && tags.alternative_intents.length) {
+    const panel = el('div', 'panel');
+    panel.append(el('div', 'panel__head', tr('tag_alternatives')));
+    const dl = el('dl', 'kv kv--fact');
+    tags.alternative_intents.forEach((alt) => {
+      const label = tagLabel('intent', alt.intent)
+        + (alt.confidence !== null && alt.confidence !== undefined ? ` · ${tr('confidence', alt.confidence)}` : '');
+      kvRow(dl, label, alt.reason || null);
+    });
+    panel.append(dl);
+    card.append(panel);
+  }
+
+  // 复核判定：模型自评 和 规则引擎 是两路独立判断，分别展示，方便审计到底是
+  // "模型自己觉得该复核" 还是 "命中了确定性规则"。旧数据没有 model_/rule_ 前缀
+  // 字段（这次改动之前存的邮件），退化成展示合并后的 review_reasons 列表。
+  if (tags.model_needs_review !== undefined || tags.rule_needs_review !== undefined) {
+    const panel = el('div', 'panel');
+    panel.append(el('div', 'panel__head', tr('tag_review_breakdown')));
+    const body = el('div', 'review-breakdown');
+    body.append(reviewVerdictRow(tr('verdict_model'), tags.model_needs_review, tags.model_review_reasons));
+    body.append(reviewVerdictRow(tr('verdict_rules'), tags.rule_needs_review, tags.rule_review_reasons));
+    panel.append(body);
+    card.append(panel);
+  } else if (Array.isArray(tags.review_reasons) && tags.review_reasons.length) {
+    const panel = el('div', 'panel');
+    panel.append(el('div', 'panel__head', tr('tag_review_reasons')));
+    const ul = el('ul', 'features');
+    tags.review_reasons.forEach((line) => ul.append(el('li', null, line)));
+    panel.append(ul);
+    card.append(panel);
+  }
+
   return card;
+}
+
+// 复核判定面板里的一行：谁做的判断（模型/规则引擎）+ 判断结果 + 具体理由列表
+function reviewVerdictRow(sourceLabel, needsReview, reasons) {
+  const row = el('div', 'review-breakdown__row');
+  const head = el('div', 'review-breakdown__head');
+  head.append(el('span', 'review-breakdown__src', sourceLabel));
+  head.append(el('span', `tag ${needsReview ? 'tag--fail' : 'tag--ok'}`, needsReview ? tr('verdict_yes') : tr('verdict_no')));
+  row.append(head);
+
+  const list = Array.isArray(reasons) ? reasons.filter(Boolean) : [];
+  if (list.length) {
+    const ul = el('ul', 'features');
+    list.forEach((line) => ul.append(el('li', null, line)));
+    row.append(ul);
+  } else {
+    row.append(el('p', 'review-breakdown__empty', tr('no_reasons_recorded')));
+  }
+  return row;
 }
 
 function attachmentCard(thread) {

@@ -4,6 +4,12 @@ Thin OpenAI-compatible chat client.
 Kept deliberately dependency-light (httpx only) so it works against the official
 API or any compatible gateway. Newer model families reject some legacy
 parameters, so unsupported ones are stripped and the call is retried once.
+
+logprobs 支持：
+  调用 complete() 时传入 logprobs=True，API 会在返回的 choices 中附带
+  token 级别的 logprob 数据。配合 extract_logprobs() 可以查看模型在每个
+  分类标签 token 上的概率分布，从而获得比 LLM 自填的 "confidence" 更客观的
+  可信度信号。
 """
 
 from __future__ import annotations
@@ -48,7 +54,16 @@ _UNSUPPORTED = re.compile(
 )
 
 
-async def complete(system: str, user: str) -> dict[str, Any]:
+async def complete(system: str, user: str, *, model: str | None = None, logprobs: bool = False) -> dict[str, Any]:
+    """调用大模型 chat/completions 接口，返回原始 JSON 响应。
+
+    model 不传时用 config() 里的默认模型；传了就用调用方指定的模型——两步
+    pipeline（tags.py 打标签、server.py 写回复）可能各自配置不同的模型，
+    由各自的调用方决定传什么，llm.py 本身不关心"哪一步该用哪个模型"。
+
+    logprobs=True 时请求模型返回 token 级别对数概率，响应中会包含
+    choices[0].logprobs.content 数组，可通过 extract_logprobs() 解析。
+    """
     cfg = config()
     api_key = _env(*API_KEY_NAMES)
     if not api_key:
@@ -57,7 +72,7 @@ async def complete(system: str, user: str) -> dict[str, Any]:
         )
 
     payload: dict[str, Any] = {
-        "model": cfg["model"],
+        "model": model or cfg["model"],
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},

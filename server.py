@@ -46,6 +46,12 @@ import prompts  # noqa: E402
 import scenarios  # noqa: E402
 import store  # noqa: E402
 import tags  # noqa: E402
+import token_cost  # noqa: E402
+
+# Step 2（写回复）可以单独配置一个模型，跟 Step 1 打标签的模型不必是同一个；
+# 不设置时回退到 llm.config() 里的默认模型。token_cost 用同名的 "reply" step
+# 去查对应的单价环境变量（MODEL_PRICE_*_PER_1M_REPLY）。
+MODEL_NAME_REPLY = os.getenv("MODEL_NAME_REPLY") or None
 
 MAX_SUBJECT = 160
 MAX_BODY = 4000
@@ -74,6 +80,11 @@ def identity(request: Request) -> dict[str, str]:
 
 class SendRequest(BaseModel):
     scenario_id: str
+    subject: str = Field(default="", max_length=MAX_SUBJECT)
+    body: str = Field(min_length=1, max_length=MAX_BODY)
+
+
+class ManualReplyRequest(BaseModel):
     subject: str = Field(default="", max_length=MAX_SUBJECT)
     body: str = Field(min_length=1, max_length=MAX_BODY)
 
@@ -155,6 +166,7 @@ async def get_thread(thread_id: int, request: Request) -> dict[str, Any]:
 async def send_mail(payload: SendRequest, request: Request) -> JSONResponse:
     today = date.today()
     context = scenarios.materialise(payload.scenario_id, today)
+    # print(f"上下文信息context: {context}")
     if context is None:
         raise HTTPException(status_code=400, detail="Pick one of the listed order scenarios.")
 
@@ -165,11 +177,18 @@ async def send_mail(payload: SendRequest, request: Request) -> JSONResponse:
     subject = payload.subject.strip()
     who = identity(request)
     facts = policy.evaluate(context, today)
+    # 正则匹配判断邮件语言
     language = prompts.detect_language(f"{subject}\n{body}")
+    # print(f"识别到的邮件语言: {language}")
 
     # Step 1: classify the incoming email. Never raises, so the thread below is
     # still recorded even when the analyser is down.
-    email_tags = await tags.analyse(subject=subject, body=body, context=context)
+    # 调用模型给邮件打标签
+    # print(f"邮件内容主题: {subject}，邮件内容: {body}")
+    # policy_facts 一起传进去，人工复核规则引擎要用这些确定性事实（SLA 是否违约、
+    # 是否超出退货/保修窗口）来判断，而不是只看模型自己的判断
+    email_tags = await tags.analyse(subject=subject, body=body, context=context, policy_facts=facts)
+    # print(f"抽取出来的邮件标签: {email_tags}")
 
     thread_id = store.create_thread(
         user_id=who["user_id"],
@@ -192,17 +211,26 @@ async def send_mail(payload: SendRequest, request: Request) -> JSONResponse:
         tag_block=tags.to_prompt_block(email_tags),
     )
 
+    # 这封邮件的总成本 = Step 1（打标签，已经在 tags.analyse() 里算过）+ Step 2（写回复）。
+    # 两步分别累加，summary() 里既能看到各自的明细，也能看到总和。
+    cost_tracker = token_cost.CostTracker()
+    if isinstance(email_tags.get("token_usage"), dict):
+        cost_tracker.add_usage(email_tags["token_usage"], step="tags")
+
     started = time.perf_counter()
     try:
-        raw = await llm.complete(prompts.SYSTEM_PROMPT, user_message)
+        raw = await llm.complete(prompts.SYSTEM_PROMPT, user_message, model=MODEL_NAME_REPLY)
         reply = llm.parse_reply(llm.extract_text(raw))
     except llm.LLMError as exc:
         store.finish_thread(thread_id, status="failed", error=str(exc),
                             latency_ms=int((time.perf_counter() - started) * 1000))
+        print(f"thread={thread_id} Step 2 失败，仅 Step 1 产生成本: {cost_tracker.summary()}")
         return JSONResponse(
             status_code=502,
             content={"thread_id": thread_id, "status": "failed", "detail": str(exc)},
         )
+
+    cost_tracker.add_response(raw, step="reply")
 
     latency_ms = int((time.perf_counter() - started) * 1000)
     reply_language = reply["language"] if reply["language"] in {"en", "es"} else language
@@ -214,10 +242,33 @@ async def send_mail(payload: SendRequest, request: Request) -> JSONResponse:
         reply_subject=reply_subject,
         reply_body=reply["body"],
         reply_language=reply_language,
-        model=llm.config()["model"],
+        model=MODEL_NAME_REPLY or llm.config()["model"],
         latency_ms=latency_ms,
     )
+    print(f"thread={thread_id} token 用量/成本明细(按 step): {cost_tracker.summary()}")
+    print(f"content={store.get_thread(thread_id)}")
     return JSONResponse(status_code=200, content=store.get_thread(thread_id) or {})
+
+
+@app.post("/api/threads/{thread_id}/manual-reply")
+async def manual_reply(thread_id: int, payload: ManualReplyRequest) -> dict[str, Any]:
+    """Human-in-the-loop escape hatch: a support agent writes the reply
+    themselves, overriding whatever Step 2 produced — used when the analyser
+    flagged needs_review, or any time the AI draft just isn't good enough.
+    """
+    thread = store.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    body = payload.body.strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Write a reply before sending.")
+
+    language = prompts.detect_language(f"{payload.subject}\n{body}")
+    subject = payload.subject.strip() or prompts.fallback_subject(thread["subject"] or "", language)
+
+    store.set_manual_reply(thread_id, reply_subject=subject, reply_body=body, reply_language=language)
+    return store.get_thread(thread_id) or {}
 
 
 @app.get("/api/health")
