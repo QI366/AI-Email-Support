@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 58" role="img" aria-label="Triforce">
+  <g fill="#e8c86a">
+    <path d="M32 0 48 28H16Z"/>
+    <path d="M16 30 32 58H0Z"/>
+    <path d="M48 30 64 58H32Z"/>
+  </g>
+</svg>

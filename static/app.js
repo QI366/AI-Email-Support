@@ -652,21 +652,23 @@ const tagLabel = (group, value) => {
   return (entry && (entry[LANG] || entry.en)) || value || '—';
 };
 
-/* Chart palette. Every value below was produced by the dataviz validator against
-   the white card surface — see the notes per role. Do not eyeball replacements. */
+/* Chart palette. Every value below was re-validated against the Sheikah Slate
+   card surface (--paper #11202e) — see the notes per role. On a dark surface the
+   ordinal ramps run dim -> bright, the reverse of a light theme. Do not eyeball
+   replacements. */
 const VIZ = {
   // Intent is nominal (12 unordered categories), so it is ONE series: every bar
   // takes the same hue. Colouring bars by their own value would re-encode length.
-  intentBar: '#1d4e89',                                     // 8.39:1 on #fff
+  intentBar: '#4aa3d8',                                     // Champion's blue, 5.93:1 on #11202e
   // Urgency is ordinal (low < medium < high < critical) -> one hue, monotone
-  // lightness. Validated with --ordinal: monotone L, adjacent ΔL >= 0.06,
-  // light end 2.17:1.
-  urgency: ['#e0a191', '#cb7458', '#ad4b28', '#8a2712'],
+  // lightness. Guardian amber ramp: monotone L, adjacent ΔL >= 0.09, dim end
+  // 3.33:1 against the card.
+  urgency: ['#a35f33', '#c47a3c', '#e09a4c', '#f7c26a'],
   // Sentiment is an ordered scale with a neutral middle -> diverging. Warm/cool
   // poles, neutral grey midpoint; the negative arm reuses the validated ramp.
-  sentimentPos: '#1d5d4c',                                  // 7.71:1 on #fff
-  sentimentMid: '#aab4bf',                                  // 2.10:1 - relieved by visible labels
-  sentimentNeg: ['#e0a191', '#cb7458', '#ad4b28', '#8a2712'],
+  sentimentPos: '#7ac74f',                                  // hero tunic green, 8.04:1 on #11202e
+  sentimentMid: '#7d8f9e',                                  // 4.97:1
+  sentimentNeg: ['#a35f33', '#c47a3c', '#e09a4c', '#f7c26a'],
 };
 
 // Reading order for the diverging sentiment bar: positive, neutral, then
