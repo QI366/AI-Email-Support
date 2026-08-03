@@ -51,6 +51,9 @@
     <button class="rail__item" data-view="tags">
       <span data-i18n="view_tags">Tag analytics</span><span class="rail__count" id="count-tags">0</span>
     </button>
+    <button class="rail__item" data-view="emotion">
+      <span data-i18n="view_emotion">Emotion model</span><span class="rail__count" id="count-emotion">0</span>
+    </button>
 
     <p class="rail__label rail__label--gap is-mailonly" data-i18n="mailboxes">Mailboxes</p>
     <button class="rail__item is-active is-mailonly" data-scope="mine">
@@ -103,6 +106,29 @@
       </div>
     </header>
     <div class="tagview__body" id="tag-body"></div>
+  </section>
+
+  <!-- 情绪识别：四个小页 —— 模型说明书 / 标签说明书 / 试一段 / 所有人的测试记录 -->
+  <section class="emoview" id="emotion-view" data-i18n-label="view_emotion">
+    <header class="policy__head">
+      <div>
+        <h1 data-i18n="emo_view_title">Emotion recognition</h1>
+        <p id="emo-view-desc" data-i18n="emo_view_desc">The local emotion model: what it is, what it can label, and how it does on real text.</p>
+      </div>
+      <!-- 按人筛选只对"测试记录"页有意义，其余三页由 renderEmotionView() 隐藏 -->
+      <div class="tagview__scope" id="emo-scope" role="group" data-i18n-label="emo_scope" hidden>
+        <button type="button" data-emoscope="all" data-i18n="everyone">Everyone</button>
+        <button type="button" data-emoscope="mine" data-i18n="my_mail">Mine</button>
+      </div>
+    </header>
+    <nav class="emotabs" id="emo-tabs" role="tablist" data-i18n-label="emo_tabs">
+      <button type="button" role="tab" data-emotab="model" data-i18n="emo_tab_model">Model</button>
+      <button type="button" role="tab" data-emotab="labels" data-i18n="emo_tab_labels">Labels</button>
+      <button type="button" role="tab" data-emotab="triage" data-i18n="emo_tab_triage">Triage</button>
+      <button type="button" role="tab" data-emotab="bench" data-i18n="emo_tab_bench">Bench</button>
+      <button type="button" role="tab" data-emotab="log" data-i18n="emo_tab_log">Test log</button>
+    </nav>
+    <div class="tagview__body" id="emotion-body"></div>
   </section>
 
 </main>

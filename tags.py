@@ -7,7 +7,10 @@ Step 1 of the two-step reply pipeline: read the email before writing to it.
 -----
 分类机制（不是黑箱）
 -----
-本模块没有使用单独的 ML 分类器模型。大模型本身就是分类器：
+意图 / 紧急度 / 实体 / 摘要由大模型充当分类器；情绪（sentiment）由本地情绪模型
+服务产出，两者并发调用、互不阻塞。
+
+大模型这一路：
 
   1. 加载模板文件 email_automatic_reply_en_US.jinja2，按 "# User Prompt" 分割为
      system prompt 和 user prompt 两部分。
@@ -23,14 +26,25 @@ Step 1 of the two-step reply pipeline: read the email before writing to it.
 分类模板存放在 email_automatic_reply_en_US.jinja2 而非 Python 代码中，这样修改
 分类体系时不需要改动代码。
 
+本地情绪模型这一路（详见 emotion_recognition.py）：
+
+  emotion.classify() 返回 9 个情绪簇的模型概率，取分最高的簇（并列时取极性更负
+  的那个）写进 sentiment，该簇的分数写进 sentiment_confidence。这是真正的模型
+  概率，同一封邮件永远得到同一个结果，可以对着阈值做回归测试。
+
+  模板里那 6 种情绪的表格仍然保留，大模型给的情绪判断存进 model_sentiment 留档，
+  只有在本地服务不可用时才顶上来当兜底（此时 sentiment_source = "llm_fallback"）。
+
 ⚠️ 关于置信度的重要说明：
-  "intent_confidence" 和 "sentiment_confidence" 是大模型对自己判断的"自我评估"，
-  而不是统计模型输出的概率值。模板里要求模型在邮件模糊时输出 < 0.7 的置信度，
-  但模型是否真的遵守这条规则，取决于模型本身的能力。代码层面没有对置信度的语义
-  准确性做任何校准或验证。
+  "intent_confidence" 是大模型对自己判断的"自我评估"，而不是统计模型输出的概率值。
+  模板里要求模型在邮件模糊时输出 < 0.7 的置信度，但模型是否真的遵守这条规则，取决于
+  模型本身的能力。代码层面没有对置信度的语义准确性做任何校准或验证。
 
   -> 低置信度 = 模型"自认为"不确定（但这个自我评估也可能不准确）
   -> 高置信度 ≠ 标签一定正确
+
+  "sentiment_confidence" 不一样：它是本地情绪模型的输出概率，是可复现的统计量
+  （只有在走 llm_fallback 兜底时才退化成模型自评，看 sentiment_source 区分）。
 
 两个核心约定：
 
@@ -42,6 +56,7 @@ Step 1 of the two-step reply pipeline: read the email before writing to it.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -51,6 +66,7 @@ from typing import Any
 
 from jinja2 import Environment, StrictUndefined
 
+import emotion_recognition as emotion
 import llm
 import token_cost
 
@@ -74,7 +90,9 @@ INTENTS = (
     "product_inquiry", "wrong_missing_item", "payment_issue", "seller_complaint",
     "review_feedback", "account_security", "warranty_replacement", "other",
 )
-SENTIMENTS = ("satisfied", "neutral", "confused", "disappointed", "frustrated", "angry")
+# 情绪词表 = 本地情绪模型的 9 个簇（小写），词表本身定义在 emotion_recognition.py，
+# 这里只做引用——服务端加一个簇时不用两头改。
+SENTIMENTS = emotion.SENTIMENTS
 URGENCIES = ("low", "medium", "high", "critical")
 LANGUAGES = ("en", "es", "other")
 ENTITY_FIELDS = ("product_mentioned", "issue_mentioned", "deadline_mentioned")
@@ -97,8 +115,9 @@ TAG_FIELDS = (
 
 # B类：高风险意图——涉及账户安全/支付/投诉，出错代价高，需要人工核实
 _SENSITIVE_INTENTS = ("account_security", "payment_issue", "seller_complaint")
-# B类：情绪与紧急度同时处于高位，说明客诉已经在升级
-_NEGATIVE_SENTIMENTS = ("angry", "frustrated")
+# B类：情绪与紧急度同时处于高位，说明客诉已经在升级。负面簇的定义（hostile /
+# frustrated / anxious）跟着情绪模型走，不在这里另起一套。
+_NEGATIVE_SENTIMENTS = emotion.NEGATIVE_SENTIMENTS
 _HIGH_URGENCIES = ("high", "critical")
 
 # C类：关键词命中即视为高风险信号，按类别分组方便定位命中原因
@@ -168,6 +187,29 @@ def build_user_message(*, subject: str, body: str, context: dict[str, Any] | Non
 def _one_of(value: Any, allowed: tuple[str, ...], fallback: str) -> str:
     v = str(value or "").strip().lower()
     return v if v in allowed else fallback
+
+
+# 模板里那张情绪表还是 6 档，而入库词表已经换成 9 个簇。大模型的情绪判断只在本地
+# 情绪服务不可用时兜底顶上，所以这里把 6 档折进簇词表：disappointment 本来就属于
+# FRUSTRATED 簇，angry 对应 HOSTILE，其余同名直落。
+_LLM_SENTIMENT_TO_CLUSTER = {
+    "satisfied":    "satisfied",
+    "neutral":      "neutral",
+    "confused":     "confused",
+    "disappointed": "frustrated",
+    "frustrated":   "frustrated",
+    "angry":        "hostile",
+}
+
+
+def _llm_sentiment(value: Any) -> str:
+    """大模型给的情绪 -> 簇词表。认不出来的一律落到 neutral，和其他字段的兜底
+    策略一致：宁可给一个中性值，也不要凭空造一个不存在的标签。
+    """
+    v = str(value or "").strip().lower()
+    if v in SENTIMENTS:                 # 模型直接吐簇名也照收
+        return v
+    return _LLM_SENTIMENT_TO_CLUSTER.get(v, "neutral")
 
 
 def _confidence(value: Any) -> float | None:
@@ -286,7 +328,9 @@ def parse_tags(text: str) -> dict[str, Any] | None:
     return {
         "intent": _one_of(obj.get("intent"), INTENTS, "other"),
         "intent_confidence": _confidence(obj.get("intent_confidence")),
-        "sentiment": _one_of(obj.get("sentiment"), SENTIMENTS, "neutral"),
+        # 这两个值随后会被本地情绪模型覆盖（见 _apply_emotion），只有情绪服务
+        # 不可用时才作为兜底留在 sentiment 上。
+        "sentiment": _llm_sentiment(obj.get("sentiment")),
         "sentiment_confidence": _confidence(obj.get("sentiment_confidence")),
         "urgency": _one_of(obj.get("urgency"), URGENCIES, "low"),
         "language": _one_of(obj.get("language"), LANGUAGES, "other"),
@@ -299,6 +343,40 @@ def parse_tags(text: str) -> dict[str, Any] | None:
         "needs_review": bool(obj.get("needs_review")) if isinstance(obj.get("needs_review"), bool) else False,
         "review_reasons": _str_list(obj.get("review_reasons"), 200),
     }
+
+
+def _apply_emotion(tags: dict[str, Any], result: Any) -> None:
+    """用本地情绪模型的结果覆盖 sentiment，就地改写 tags。
+
+    大模型自己那份情绪判断先存一份快照再覆盖——和 needs_review 那边一样，两路
+    判断都留着，事后能看出到底是谁判错了：
+
+      model_sentiment / model_sentiment_confidence —— 大模型的自评，原样保留
+      sentiment       / sentiment_confidence       —— 本地模型的簇 + 该簇概率
+      sentiment_source —— "local_model" 还是 "llm_fallback"，用来区分上面那个
+                          置信度到底是统计概率还是模型自评
+      emotion          —— 本地模型的完整信号（l1 升级判定、negativity、9 个簇
+                          的分数、反讽标记等），供复核界面和事后调阈值用
+
+    情绪服务挂掉时不抛异常：sentiment 保持大模型的兜底值，错误原因记在
+    emotion.error 里。情绪是辅助信号，它不该让整封邮件收不到回复。
+    """
+    tags["model_sentiment"] = tags.get("sentiment")
+    tags["model_sentiment_confidence"] = tags.get("sentiment_confidence")
+
+    if isinstance(result, dict):
+        tags["sentiment"] = result["sentiment"]
+        tags["sentiment_confidence"] = _confidence(result.get("score"))
+        tags["sentiment_source"] = "local_model"
+        # sentiment 已经单独存了，emotion 块里不再重复一份
+        tags["emotion"] = {k: v for k, v in result.items() if k != "sentiment"}
+        return
+
+    tags["sentiment_source"] = "llm_fallback"
+    detail = (
+        f"{type(result).__name__}: {result}" if isinstance(result, BaseException) else str(result)
+    )
+    tags["emotion"] = {"error": detail[:300]}
 
 
 def _keyword_hits(text: str, keywords: tuple[str, ...]) -> list[str]:
@@ -341,6 +419,19 @@ def _apply_review_rules(
     # B类：情绪和紧急度同时处于高位 —— 客诉已经在升级
     if tags.get("sentiment") in _NEGATIVE_SENTIMENTS and tags.get("urgency") in _HIGH_URGENCIES:
         reasons.append(f"情绪（{tags['sentiment']}）与紧急度（{tags['urgency']}）同时处于高位")
+
+    # B类：本地情绪模型自己的升级判定。它读的是语气强度（辱骂、威胁、反复催促），
+    # 和上面那条"情绪+紧急度"是两个独立信号——一封 urgency=low 的邮件照样可能被
+    # 判成 P0_ESCALATE，所以这里单独判一次，不做与运算。
+    emo = tags.get("emotion") or {}
+    if emo.get("l1") == emotion.ESCALATION_L1:
+        reasons.append(
+            f"情绪模型判定为升级级别 {emo['l1']}（escalation_score={emo.get('escalation_score')}）"
+        )
+    # B类：反讽 —— 字面礼貌、实际负面（"Great job losing my package again"），
+    # 自动回复最容易在这种邮件上翻车，一律转人工
+    if emo.get("sarcasm_override"):
+        reasons.append("情绪模型识别到反讽（字面积极、实际负面）")
 
     # C类：关键词命中 —— 法务/安全/欺诈/主动要求人工/声誉/隐私，命中任意一类就说明原因
     for label, keywords in (
@@ -406,12 +497,24 @@ async def analyse(
 ) -> dict[str, Any]:
     """对一封邮件做分类。入口函数，永不抛异常（详见模块文档字符串）。"""
     started = time.perf_counter()
-    try:
-        # 步骤 A：调用大模型，让 LLM 读取邮件并返回分类 JSON（可单独指定 Step 1 的模型）
-        raw = await llm.complete(
+
+    # 步骤 A：两个分类器并发跑——大模型读内容（意图/紧急度/实体/摘要），本地模型
+    # 判语气（情绪）。两者是各自独立的进程，串行等待会把两边的耗时直接相加。
+    # return_exceptions=True：任何一路挂掉都由下面各自的分支处理，不会让另一路
+    # 已经拿到的结果跟着丢掉。
+    raw, emotion_result = await asyncio.gather(
+        llm.complete(
             SYSTEM_PROMPT, build_user_message(subject=subject, body=body, context=context),
             model=MODEL_NAME_TAGS,
-        )
+        ),
+        emotion.classify(f"{subject}\n\n{body}".strip() if subject.strip() else body),
+        return_exceptions=True,
+    )
+    print(f"本地情绪模型结果: {emotion_result}")
+
+    try:
+        if isinstance(raw, BaseException):
+            raise raw
         print(f"LLM 邮件原始抽取结果: {raw}")
         # Step 1 自己的 token 用量/成本，按 "tags" 这个 step 定价，供调用方（server.py）
         # 汇总进整封邮件的总成本
@@ -433,7 +536,11 @@ async def analyse(
             "token_usage": usage,
         }
 
-    # 步骤 C：确定性规则引擎复核——不管模型自己判没判 needs_review，命中规则就强制转人工
+    # 步骤 C：情绪以本地模型为准覆盖掉大模型的自评（服务不可用时保留兜底值）。
+    # 必须排在规则引擎之前——下面的复核规则要读 sentiment 和 emotion.l1。
+    _apply_emotion(tags, emotion_result)
+
+    # 步骤 D：确定性规则引擎复核——不管模型自己判没判 needs_review，命中规则就强制转人工
     _apply_review_rules(tags, subject=subject, body=body, context=context, policy_facts=policy_facts)
 
     tags["token_usage"] = usage

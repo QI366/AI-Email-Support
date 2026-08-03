@@ -473,7 +473,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .mailrow__preview {
   margin: 0 0 8px;
   font-size: 13px; color: var(--ink-2); line-height: 1.4;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 
 .mailrow__tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -657,11 +657,19 @@ button, input, textarea { font: inherit; color: inherit; }
 .tagchip__v { font-size: 12.5px; font-weight: 500; }
 .tagchip__c { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
 
-/* sentiment and urgency carry the signal; intent and language stay neutral */
+/* sentiment and urgency carry the signal; intent and language stay neutral.
+   The nine emotion clusters collapse into three tint bands here — a chip is a
+   "how much attention" flag, not the chart, and neutral / confused / self_blame
+   need none. `disappointed` and `angry` are the retired vocabulary, kept so
+   threads classified before the switch still read. */
+.tagchip.is-sentiment-satisfied,
+.tagchip.is-sentiment-grateful     { background: var(--tunic-tint); border-color: rgba(122,199,79,.34); }
+.tagchip.is-sentiment-demanding,
+.tagchip.is-sentiment-anxious      { background: var(--gold-tint); border-color: var(--gold-edge); }
 .tagchip.is-sentiment-frustrated,
 .tagchip.is-sentiment-disappointed { background: var(--guardian-tint); border-color: rgba(224,154,76,.34); }
+.tagchip.is-sentiment-hostile,
 .tagchip.is-sentiment-angry        { background: var(--blood-moon-tint); border-color: rgba(239,106,82,.38); }
-.tagchip.is-sentiment-satisfied    { background: var(--tunic-tint); border-color: rgba(122,199,79,.34); }
 .tagchip.is-urgency-medium         { background: var(--gold-tint); border-color: var(--gold-edge); }
 .tagchip.is-urgency-high           { background: var(--guardian-tint); border-color: rgba(224,154,76,.34); }
 .tagchip.is-urgency-critical       { background: var(--blood-moon-tint); border-color: rgba(239,106,82,.42); }
@@ -1176,6 +1184,10 @@ button, input, textarea { font: inherit; color: inherit; }
   border: 1px solid var(--line); border-radius: 999px; background: rgba(12,22,34,.6);
 }
 
+/* the emotion view hides its scope toggle on the reference sub-pages via the
+   hidden attribute, and the UA's [hidden] rule loses to the display above */
+.tagview__scope[hidden] { display: none; }
+
 .tagview__scope button {
   border: 0; background: none; border-radius: 999px;
   padding: 5px 13px; font-size: 12.5px; color: var(--ink-3); cursor: pointer;
@@ -1353,6 +1365,436 @@ button, input, textarea { font: inherit; color: inherit; }
   color: var(--ink);
 }
 
+/* ------------------------------------------- emotion model bench view --- */
+/* Same shell as the tag analytics view — same column, same scroll, and it
+   reuses .tagview__body / .tagview__scope for the parts that are identical.
+   It gets its own class rather than sharing .tagview so that switching to the
+   tag view cannot show both panels at once. */
+.emoview {
+  display: none;
+  grid-column: 2 / -1;
+  min-height: 0;
+  flex-direction: column;
+  background: transparent;
+}
+
+.workspace.is-emotion .emoview { display: flex; }
+.workspace.is-emotion .list,
+.workspace.is-emotion .reader,
+.workspace.is-emotion .is-mailonly { display: none; }
+
+.emoview .vizcard,
+.emoview .statrow { margin-bottom: 14px; }
+
+.emonote { margin: 8px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
+
+/* the nine clusters — a reference card, so the raw labels stay visible */
+.emogrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(212px, 1fr));
+  gap: 10px;
+}
+
+.emocell {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  background: var(--shell-2);
+  padding: 10px 11px 11px;
+}
+
+.emocell__head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.emocell__dot { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
+.emocell__name { font-size: 13px; font-weight: 500; color: var(--ink); }
+
+.emocell__tag {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .05em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line);
+}
+
+.emocell__tag.is-neg { color: var(--blood-moon); border-color: rgba(239,106,82,.38); }
+.emocell__tag.is-pos { color: var(--tunic); border-color: rgba(122,199,79,.34); }
+
+.emocell__meta {
+  margin-top: 5px;
+  font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+}
+
+.emocell__labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+
+.emolabel {
+  font-family: var(--mono); font-size: 10px;
+  padding: 2px 6px; border-radius: 3px;
+  background: var(--shell-3); color: var(--ink-2);
+}
+
+/* try-a-message */
+.emoinput {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--shell);
+  color: var(--ink);
+  font: inherit; font-size: 13px; line-height: 1.55;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.emoinput:focus { outline: none; border-color: var(--sheikah); box-shadow: 0 0 0 3px rgba(94,224,230,.13); }
+.emoinput--note { margin-top: 10px; font-size: 12.5px; }
+
+.emobench__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+
+.emobench__count {
+  font-family: var(--mono); font-size: 10.5px; font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+.emobench__label {
+  margin: 16px 0 8px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+
+.emosamples { display: grid; grid-template-columns: repeat(auto-fit, minmax(236px, 1fr)); gap: 8px; }
+
+.emosample {
+  display: flex; flex-direction: column; gap: 4px;
+  text-align: left; cursor: pointer;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  background: var(--shell-2);
+  padding: 9px 11px;
+  transition: border-color .15s, background .15s;
+}
+
+.emosample:hover { border-color: var(--sheikah); background: var(--shell-3); }
+
+.emosample__text {
+  font-size: 12px; line-height: 1.45; color: var(--ink-2);
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.emosample__hint { font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); }
+
+/* result card */
+.emoresult__text {
+  margin: 0 0 13px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--line);
+  background: var(--shell-2);
+  border-radius: 0 var(--r) var(--r) 0;
+  font-family: var(--mail); font-size: 13.5px; line-height: 1.6; color: var(--ink);
+}
+
+.emoresult .kv { margin-top: 13px; }
+
+.tagchip.is-l1-P0_ESCALATE { background: var(--blood-moon-tint); border-color: rgba(239,106,82,.42); }
+.tagchip.is-l1-P0_ESCALATE .tagchip__v { color: var(--blood-moon); font-weight: 600; }
+.tagchip.is-l1-P1_RISK     { background: var(--guardian-tint); border-color: rgba(224,154,76,.34); }
+.tagchip.is-l1-AMBIGUOUS   { background: var(--shell-3); }
+.tagchip.is-sarcasm        { background: var(--gold-tint); border-color: var(--gold-edge); }
+
+.emoscores { margin-top: 16px; }
+.emoscores .barlist { margin-top: 9px; }
+/* the winning cluster: the row the chip above already named */
+.barlist__row.is-on .barlist__name { color: var(--ink); font-weight: 500; }
+.barlist__row.is-on .barlist__val { color: var(--sheikah); }
+
+/* feedback form */
+.emofb {
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid var(--line);
+}
+
+.emofb__verdicts { display: flex; gap: 8px; margin-top: 10px; }
+
+.emofb__verdict {
+  flex: 0 0 auto; cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--shell-2);
+  color: var(--ink-2);
+  padding: 6px 16px; font-size: 12.5px;
+  transition: background .15s, border-color .15s, color .15s;
+}
+
+.emofb__verdict:hover { background: var(--shell-3); color: var(--ink); }
+.emofb__verdict.is-correct.is-on { background: var(--tunic-tint); border-color: rgba(122,199,79,.44); color: var(--tunic); }
+.emofb__verdict.is-wrong.is-on   { background: var(--blood-moon-tint); border-color: rgba(239,106,82,.46); color: var(--blood-moon); }
+
+.emofb__hint { margin: 14px 0 8px; font-size: 11.5px; color: var(--ink-3); }
+.emofb__picks { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.emopick {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--shell-2);
+  color: var(--ink-2);
+  padding: 4px 11px; font-size: 12px;
+  transition: background .15s, border-color .15s, color .15s;
+}
+
+.emopick:hover { background: var(--shell-3); color: var(--ink); }
+.emopick.is-on { border-color: var(--sheikah); color: var(--ink); background: var(--shell-3); }
+.emopick__dot { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+
+.emofb__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.emofb__saved { font-size: 11.5px; color: var(--ink-3); }
+
+/* test log — one shared board, so every row shows who ran it */
+.emolog { display: flex; flex-direction: column; gap: 7px; }
+
+.emolog__row {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--line);
+  border-radius: var(--r);
+  background: var(--shell-2);
+  padding: 9px 12px;
+  transition: border-color .15s, background .15s;
+}
+
+.emolog__row:hover { background: var(--shell-3); }
+.emolog__row.is-on { border-left-color: var(--sheikah); background: var(--shell-3); }
+
+.emolog__top { display: flex; align-items: center; gap: 8px; }
+.emolog__dot { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
+.emolog__pred { font-size: 12.5px; font-weight: 500; color: var(--ink); }
+
+.emolog__score {
+  font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-3);
+}
+
+.emolog__verdict {
+  margin-left: auto;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-3);
+}
+
+.emolog__verdict.is-correct { color: var(--tunic); border-color: rgba(122,199,79,.34); background: var(--tunic-tint); }
+.emolog__verdict.is-wrong   { color: var(--blood-moon); border-color: rgba(239,106,82,.38); background: var(--blood-moon-tint); }
+
+.emolog__text {
+  margin: 6px 0 0;
+  font-size: 12px; line-height: 1.5; color: var(--ink-2);
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.emolog__meta {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px;
+  font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+}
+
+.emolog__true { color: var(--guardian); }
+
+/* -------------------------------------------- emotion view: sub-pages --- */
+/* Four sub-pages under one rail entry. The bar sits below the header rather
+   than inside it so the active tab's underline lands on the edge of the body it
+   opens — the tab and its page read as one surface. */
+.emotabs {
+  flex: 0 0 auto;
+  display: flex; gap: 2px;
+  padding: 0 22px;
+  background: rgba(17,32,46,.8);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.emotabs button {
+  border: 0; background: none; cursor: pointer;
+  padding: 9px 14px 8px;
+  font-family: var(--ui); font-size: 12.5px; color: var(--ink-3);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;                    /* the underline covers the head rule */
+  white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+
+.emotabs button:hover { color: var(--ink); }
+
+.emotabs button.is-on {
+  color: var(--sheikah);
+  border-bottom-color: var(--sheikah);
+}
+
+/* ------------------------------------------- emotion view: model page --- */
+.emomodel__id { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+
+.emomodel__name {
+  font-family: var(--mono); font-size: 13.5px; color: var(--sheikah);
+  text-decoration: none; border-bottom: 1px solid transparent;
+}
+
+a.emomodel__name:hover { border-bottom-color: var(--sheikah-edge); }
+
+.emomodel__badge {
+  padding: 2px 7px; border-radius: 3px;
+  border: 1px solid var(--gold-edge); background: var(--gold-tint);
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--gold);
+}
+
+.emomodel__lede { margin: 11px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+.emomodel .kv { margin-top: 14px; }
+
+/* numbered pipeline — the number is the point, so it is a mark, not a bullet */
+.emosteps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+
+.emosteps__item { display: flex; gap: 11px; align-items: flex-start; }
+
+.emosteps__num {
+  flex: 0 0 auto;
+  width: 21px; height: 21px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--sheikah-edge); background: var(--sheikah-tint);
+  font-family: var(--mono); font-size: 10.5px; color: var(--sheikah);
+}
+
+.emosteps__text { min-width: 0; }
+.emosteps__t { font-size: 12.5px; font-weight: 500; color: var(--ink); line-height: 1.35; }
+.emosteps__d { margin: 4px 0 0; font-size: 12px; line-height: 1.55; color: var(--ink-2); }
+
+/* a code identifier you would grep the service log for — never translated */
+.emofield {
+  font-family: var(--mono); font-size: 11.5px; color: var(--sheikah);
+  white-space: nowrap;
+}
+
+.emolimits { display: flex; flex-direction: column; gap: 11px; }
+
+.emolimits__item {
+  border-left: 2px solid var(--guardian);
+  padding-left: 11px;
+}
+
+/* the rules that route to a human get the escalation colour, not the caveat one */
+.emolimits__item.is-review { border-left-color: var(--blood-moon); }
+
+.emolimits__t { font-size: 12.5px; font-weight: 500; color: var(--ink); line-height: 1.35; }
+.emolimits__d { margin: 4px 0 0; font-size: 12px; line-height: 1.55; color: var(--ink-2); }
+
+/* the ten-stage chain: the one model stage has to look different from the nine
+   deterministic ones, because that difference is the whole point of the card */
+.emochain {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  margin-bottom: 16px;
+}
+
+.emochain__node {
+  padding: 4px 9px; border-radius: 3px;
+  border: 1px solid var(--line-soft); background: var(--shell-2);
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.emochain__node.is-model {
+  border-color: var(--sheikah-edge); background: var(--sheikah-tint);
+  color: var(--sheikah);
+}
+
+.emochain__arrow { font-size: 11px; color: var(--ink-3); }
+
+/* a deliberate design choice, as opposed to a caveat (amber) or a route (red) */
+.emolimits__item.is-choice { border-left-color: var(--sheikah); }
+
+/* ------------------------------------------ emotion view: triage page --- */
+.emolayers { display: flex; flex-direction: column; gap: 12px; }
+
+.emolayers__row { display: flex; gap: 12px; align-items: flex-start; }
+
+.emolayers__tag {
+  flex: 0 0 62px;
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 5px 8px; border-radius: 3px;
+  border: 1px solid var(--gold-edge); background: var(--gold-tint);
+}
+
+.emolayers__name { font-family: var(--mono); font-size: 12px; color: var(--gold); }
+.emolayers__size {
+  margin-left: auto;
+  font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+}
+
+.emolayers__text { min-width: 0; }
+.emolayers__head { margin-bottom: 3px; }
+
+/* the escalation formula, set as code — it is arithmetic, not prose */
+.emoformula {
+  margin-bottom: 15px; padding: 12px 14px;
+  border: 1px solid var(--line-soft); border-radius: var(--r);
+  background: var(--shell-2);
+  overflow-x: auto;
+}
+
+.emoformula__line {
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.75;
+  color: var(--ink-2); white-space: pre;
+}
+
+.emoformula__cap {
+  margin: 10px 0 4px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+
+.emoformula__cap:first-child { margin-top: 0; }
+
+.emofallback { margin-top: 12px; }
+.emofallback__chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+.emothreshold {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--shell-2);
+  font-size: 11.5px; color: var(--ink-2);
+}
+
+/* literal patterns and literal customer wording: never translated, so they get
+   the typography that says "this is a string, not a sentence" */
+.emocovers { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+.emoquote { font-family: var(--mail); font-size: 12.5px; font-style: italic; color: var(--ink-2); }
+
+.dtable .tagchip { padding: 3px 9px; font-family: var(--mono); font-size: 11px; }
+
+.panel__head--gap { margin-top: 18px; }
+
+/* ------------------------------------------ emotion view: labels page --- */
+.emocell__sem { margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+
+.emocell__quote {
+  margin: 8px 0 0;
+  font-family: var(--mail); font-size: 11.5px; font-style: italic;
+  color: var(--ink-3); line-height: 1.4;
+}
+
+/* labels GoEmotions barely trained: they may join a cluster score, never decide */
+.emocell__tag.is-thin { color: var(--ink-3); border-color: var(--line); }
+.emolabel.is-thin {
+  color: var(--ink-3); background: transparent;
+  border: 1px dashed var(--line);
+  padding: 1px 5px;
+}
+
+.emotier { margin-bottom: 14px; }
+.emotier:last-of-type { margin-bottom: 0; }
+.emotier__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.emotier__name { font-size: 12.5px; font-weight: 500; color: var(--ink); }
+.emotier__sub { font-size: 11.5px; color: var(--ink-3); }
+.emotier.is-low .emotier__name { color: var(--ink-2); }
+
+.emomap__dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 7px; vertical-align: baseline;
+}
+
+.emomap__raw { margin-left: 8px; font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+
+/* the diagonal of the confusion table is agreement — it stays plain so the
+   off-diagonal tint is the only thing that draws the eye */
+.dtable td.is-diagonal { color: var(--ink-3); }
+
 .dtable--cross { display: block; overflow-x: auto; white-space: nowrap; }
 
 /* --------------------------------------------------------------- toast -- */
@@ -1433,8 +1875,11 @@ button, input, textarea { font: inherit; color: inherit; }
   .policy__detail { padding: 16px 14px 44px; }
   .pdetail__head { flex-wrap: wrap; }
 
-  .tagview { grid-column: 1 / -1; }
+  .tagview,
+  .emoview { grid-column: 1 / -1; }
   .tagview__body { padding: 14px 14px 44px; }
+  .emotabs { padding: 0 8px; }
+  .emotabs button { padding: 9px 10px 8px; }
   .barlist__row { grid-template-columns: minmax(76px, 40%) 1fr auto; }
 }
 

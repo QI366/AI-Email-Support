@@ -40,6 +40,7 @@ from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
+import emotion_recognition as emotion  # noqa: E402
 import llm  # noqa: E402
 import policy  # noqa: E402
 import prompts  # noqa: E402
@@ -55,6 +56,9 @@ MODEL_NAME_REPLY = os.getenv("MODEL_NAME_REPLY") or None
 
 MAX_SUBJECT = 160
 MAX_BODY = 4000
+# 情绪测试台的单次输入上限。比邮件正文短：这里是拿一段话试模型，不是发一封信，
+# 而且服务端按句子切分后再池化，几千字的输入只会把一次"试一下"拖成好几秒。
+MAX_EMOTION_TEXT = 2000
 
 app = FastAPI(title="Helios Support Mailbox", version="1.0.0")
 store.init()
@@ -87,6 +91,17 @@ class SendRequest(BaseModel):
 class ManualReplyRequest(BaseModel):
     subject: str = Field(default="", max_length=MAX_SUBJECT)
     body: str = Field(min_length=1, max_length=MAX_BODY)
+
+
+class EmotionTestRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_EMOTION_TEXT)
+    sample_id: str | None = Field(default=None, max_length=60)
+
+
+class EmotionFeedbackRequest(BaseModel):
+    verdict: str | None = Field(default=None)          # 'correct' | 'wrong' | None(撤回评价)
+    true_labels: list[str] = Field(default_factory=list)
+    note: str = Field(default="", max_length=400)
 
 
 # --------------------------------------------------------------------------
@@ -269,6 +284,113 @@ async def manual_reply(thread_id: int, payload: ManualReplyRequest) -> dict[str,
 
     store.set_manual_reply(thread_id, reply_subject=subject, reply_body=body, reply_language=language)
     return store.get_thread(thread_id) or {}
+
+
+# --------------------------------------------------------------------------
+# 情绪模型测试台：拿一段文本直接试本地情绪模型，人给对错反馈，记录所有人可见
+# --------------------------------------------------------------------------
+@app.get("/api/emotion/meta")
+async def emotion_meta() -> dict[str, Any]:
+    """模型档案 + 能识别的全部标签 + 示例语料 + 端点是否配置好。页面的说明书部分。
+
+    不返回 EMOTION_API_URL：那是内网地址，页面只需要知道"配没配"（enabled），
+    知道具体指到哪台机器对使用者没有帮助。
+    """
+    cfg = emotion.config()
+    return {
+        "enabled": cfg["enabled"],
+        "timeout": cfg["timeout"],
+        "model": emotion.model_card(),
+        "aggregator": emotion.aggregator(),
+        "response_fields": list(emotion.RESPONSE_FIELDS),
+        "taxonomy": emotion.taxonomy(),
+        "samples": [dict(s) for s in emotion.SAMPLES],
+        "max_chars": MAX_EMOTION_TEXT,
+    }
+
+
+@app.post("/api/emotion/test")
+async def emotion_test(payload: EmotionTestRequest, request: Request) -> dict[str, Any]:
+    """跑一次情绪识别并落库。
+
+    识别失败**也要落库**（error 列写原因）——"模型对这句话给不出结果"本身就是测试
+    结果，把它丢掉等于让测试台只展示模型顺利的那一面。所以这里不抛 5xx。
+    """
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Type something to analyse.")
+
+    who = identity(request)
+    sample_id = payload.sample_id if payload.sample_id in emotion.SAMPLE_IDS else None
+
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    try:
+        result = await emotion.classify(text)
+    except emotion.EmotionError as exc:
+        error = str(exc)[:400]
+    except Exception as exc:  # noqa: BLE001 - 测试台不该被一个意外异常打死
+        error = f"{type(exc).__name__}: {exc}"[:400]
+
+    test_id = store.create_emotion_test(
+        user_id=who["user_id"],
+        ip=who["ip"],
+        text=text,
+        sample_id=sample_id,
+        result_json=json.dumps(result, ensure_ascii=False) if result else None,
+        sentiment=result["sentiment"] if result else None,
+        score=result["score"] if result else None,
+        l1=(result or {}).get("l1"),
+        latency_ms=(result or {}).get("latency_ms"),
+        error=error,
+        created_at=time.time(),
+    )
+    return store.get_emotion_test(test_id) or {}
+
+
+@app.post("/api/emotion/tests/{test_id}/feedback")
+async def emotion_feedback(test_id: int, payload: EmotionFeedbackRequest, request: Request) -> dict[str, Any]:
+    verdict = payload.verdict if payload.verdict in ("correct", "wrong") else None
+    # 真实标签过白名单：前端传来的簇名必须是模型真的有的那 9 个，去重且保序
+    labels = list(dict.fromkeys(l for l in payload.true_labels if l in emotion.SENTIMENTS))
+    if verdict == "wrong" and not labels:
+        raise HTTPException(status_code=400, detail="Pick the label you think is right.")
+
+    who = identity(request)
+    if not store.set_emotion_feedback(
+        test_id, verdict=verdict, true_labels=labels, note=payload.note.strip(), user_id=who["user_id"]
+    ):
+        raise HTTPException(status_code=404, detail="Test not found")
+    return store.get_emotion_test(test_id) or {}
+
+
+@app.get("/api/emotion/tests")
+async def emotion_tests(request: Request, scope: str = "all", limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    who = identity(request)
+    limit = max(1, min(limit, 300))
+    user_filter = who["user_id"] if scope == "mine" else None
+    return {
+        "scope": scope,
+        "user_id": who["user_id"],
+        "tests": store.list_emotion_tests(user_filter, limit=limit, offset=offset),
+    }
+
+
+@app.get("/api/emotion/tests/{test_id}")
+async def emotion_test_detail(test_id: int) -> dict[str, Any]:
+    """单条测试。给 ?test=<id> 这种分享链接用——测试台是块公开板子，
+    "你看模型把我这句话读成什么了"得能指到具体哪一条。"""
+    test = store.get_emotion_test(test_id)
+    if test is None:
+        raise HTTPException(status_code=404, detail="Test not found")
+    return test
+
+
+@app.get("/api/emotion/stats")
+async def emotion_stats(request: Request, scope: str = "all") -> dict[str, Any]:
+    who = identity(request)
+    user_filter = who["user_id"] if scope == "mine" else None
+    return {"scope": scope, "vocabulary": list(emotion.SENTIMENTS), **store.emotion_test_stats(user_filter)}
 
 
 @app.get("/api/health")

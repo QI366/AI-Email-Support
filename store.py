@@ -37,6 +37,32 @@ CREATE TABLE IF NOT EXISTS threads (
 );
 CREATE INDEX IF NOT EXISTS idx_threads_user ON threads(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_threads_created ON threads(id DESC);
+
+-- 情绪模型测试台：一行 = 一次"拿一段文本喂给本地情绪模型"的记录 + 人给的反馈。
+-- 和 threads 完全分开：这里测的是模型本身，不是某封客户来信的回复流程。
+-- 反馈字段可以为空（测了还没评价），也可以被另一个人改写——记录里存 feedback_by，
+-- 谁改的看得见。
+CREATE TABLE IF NOT EXISTS emotion_tests (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       TEXT    NOT NULL,
+    ip            TEXT    NOT NULL,
+    text          TEXT    NOT NULL,
+    sample_id     TEXT,              -- 来自哪条内置示例，自由输入为 NULL
+    result_json   TEXT,              -- emotion.classify() 的完整记录
+    sentiment     TEXT,              -- 冗余一份，聚合时不用解 JSON
+    score         REAL,
+    l1            TEXT,
+    latency_ms    INTEGER,
+    error         TEXT,              -- 识别失败时的原因（不支持的语言、服务不可用…）
+    verdict       TEXT,              -- 'correct' | 'wrong' | NULL(还没人评价)
+    true_labels   TEXT,              -- JSON 数组：评价者认为的真实簇，可多选
+    note          TEXT,
+    feedback_by   TEXT,
+    feedback_at   REAL,
+    created_at    REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_emotests_created ON emotion_tests(id DESC);
+CREATE INDEX IF NOT EXISTS idx_emotests_user ON emotion_tests(user_id, id DESC);
 """
 
 
@@ -236,6 +262,173 @@ def tag_stats(user_id: str | None = None) -> dict[str, Any]:
         "avg_analysis_ms": round(ms_sum / ms_n) if ms_n else None,
         "distributions": {k: v for k, v in dists.items()},
         "intent_by_urgency": cross,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 情绪模型测试台
+# ---------------------------------------------------------------------------
+
+_EMO_VERDICTS = ("correct", "wrong")
+
+
+def create_emotion_test(**kw: Any) -> int:
+    cols = ("user_id", "ip", "text", "sample_id", "result_json", "sentiment",
+            "score", "l1", "latency_ms", "error", "created_at")
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            f"INSERT INTO emotion_tests ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+            [kw.get(c) for c in cols],
+        )
+        return int(cur.lastrowid)
+
+
+def set_emotion_feedback(
+    test_id: int,
+    *,
+    verdict: str | None,
+    true_labels: list[str],
+    note: str | None,
+    user_id: str,
+) -> bool:
+    """给一条测试记录写反馈。返回 False 表示这条记录不存在。
+
+    谁都能评价谁的测试——这是一块公共的模型体检板，不是私人笔记。后写的覆盖先写的，
+    但 feedback_by 会记下最后动手的人，翻记录时看得见是谁的判断。
+    """
+    with _lock, _connect() as conn:
+        row = conn.execute("SELECT id FROM emotion_tests WHERE id = ?", (test_id,)).fetchone()
+        if row is None:
+            return False
+        conn.execute(
+            """UPDATE emotion_tests SET verdict=?, true_labels=?, note=?, feedback_by=?, feedback_at=?
+               WHERE id=?""",
+            (
+                verdict if verdict in _EMO_VERDICTS else None,
+                json.dumps(true_labels, ensure_ascii=False) if true_labels else None,
+                note or None,
+                user_id,
+                time.time(),
+                test_id,
+            ),
+        )
+    return True
+
+
+def _emotion_row(row: sqlite3.Row, *, full: bool) -> dict[str, Any]:
+    text = row["text"] or ""
+    out: dict[str, Any] = {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "sample_id": row["sample_id"],
+        "text": text if full else ((text[:160] + "…") if len(text) > 160 else text),
+        "sentiment": row["sentiment"],
+        "score": row["score"],
+        "l1": row["l1"],
+        "latency_ms": row["latency_ms"],
+        "error": row["error"],
+        "verdict": row["verdict"],
+        "true_labels": json.loads(row["true_labels"]) if row["true_labels"] else [],
+        "note": row["note"],
+        "feedback_by": row["feedback_by"],
+        "feedback_at": row["feedback_at"],
+        "created_at": row["created_at"],
+    }
+    if full:
+        out["result"] = json.loads(row["result_json"]) if row["result_json"] else None
+    return out
+
+
+def get_emotion_test(test_id: int) -> dict[str, Any] | None:
+    with _lock, _connect() as conn:
+        row = conn.execute("SELECT * FROM emotion_tests WHERE id = ?", (test_id,)).fetchone()
+    return _emotion_row(row, full=True) if row else None
+
+
+def list_emotion_tests(user_id: str | None = None, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM emotion_tests"
+    args: list[Any] = []
+    if user_id:
+        sql += " WHERE user_id = ?"
+        args.append(user_id)
+    sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    args += [limit, offset]
+    with _lock, _connect() as conn:
+        rows = conn.execute(sql, args).fetchall()
+    # 列表里也带上完整 result：结果卡要画 9 个簇的分数条，再为每行发一次详情请求不值当
+    return [{**_emotion_row(r, full=True)} for r in rows]
+
+
+def emotion_test_stats(user_id: str | None = None) -> dict[str, Any]:
+    """测试台的聚合口径。
+
+    判对率的分母是**已反馈**的条数，不是测试总数——没人评价的记录既不算对也不算错，
+    混进分母只会让准确率随着"测了没评"的数量凭空下降。
+    """
+    sql = "SELECT * FROM emotion_tests"
+    args: list[Any] = []
+    if user_id:
+        sql += " WHERE user_id = ?"
+        args.append(user_id)
+    with _lock, _connect() as conn:
+        rows = conn.execute(sql, args).fetchall()
+
+    predicted: dict[str, int] = {}       # 模型判成了什么
+    truth: dict[str, int] = {}           # 人认为真实是什么
+    confusion: dict[str, dict[str, int]] = {}   # 预测 -> 真实标签
+    per_cluster: dict[str, dict[str, int]] = {}  # 每个簇各自的对/错
+    total = len(rows)
+    failed = reviewed = correct = 0
+    ms_sum = ms_n = 0
+    testers: set[str] = set()
+
+    def bump(predicted_cluster: str, true_cluster: str) -> None:
+        truth[true_cluster] = truth.get(true_cluster, 0) + 1
+        cell = confusion.setdefault(predicted_cluster, {})
+        cell[true_cluster] = cell.get(true_cluster, 0) + 1
+
+    for row in rows:
+        testers.add(row["user_id"])
+        if isinstance(row["latency_ms"], int):
+            ms_sum += row["latency_ms"]
+            ms_n += 1
+        if row["error"]:
+            failed += 1
+            continue
+
+        s = row["sentiment"]
+        if s:
+            predicted[s] = predicted.get(s, 0) + 1
+
+        verdict = row["verdict"]
+        if verdict not in _EMO_VERDICTS:
+            continue
+        reviewed += 1
+        bucket = per_cluster.setdefault(s or "—", {"correct": 0, "wrong": 0})
+        if verdict == "correct":
+            correct += 1
+            bucket["correct"] += 1
+            # 判对时人没必要再选标签，真实标签就是模型给的那个
+            if s:
+                bump(s, s)
+        else:
+            bucket["wrong"] += 1
+            for label in (json.loads(row["true_labels"]) if row["true_labels"] else []):
+                if s:
+                    bump(s, label)
+
+    return {
+        "total": total,
+        "failed": failed,
+        "reviewed": reviewed,
+        "correct": correct,
+        "accuracy": round(correct / reviewed, 3) if reviewed else None,
+        "avg_latency_ms": round(ms_sum / ms_n) if ms_n else None,
+        "testers": len(testers),
+        "predicted": predicted,
+        "truth": truth,
+        "confusion": confusion,
+        "per_cluster": per_cluster,
     }
 
 
