@@ -242,6 +242,16 @@ Detect the language of the buyer message and return as an ISO 639-1 code.
 
 ---
 
+{% if translation_note %}
+
+## Message Language Note
+
+{{ translation_note }}
+
+---
+
+{% endif %}
+
 {% if product_context %}
 
 ## product_information

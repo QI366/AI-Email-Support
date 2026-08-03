@@ -8,16 +8,22 @@ Design notes
   adjective, so the model does not pad the email with sympathy filler.
 * All arithmetic arrives pre-computed from policy.evaluate(). The model is told
   the facts block outranks its own reading of the raw JSON.
-* Language is mirrored from the customer, restricted to English and Spanish.
+* Language is mirrored from the customer. The pipeline reads every email in
+  English (translation.to_english()), but the reply is written directly in the
+  customer's own language — a machine translation of an English draft reads like
+  a machine translation, and this is the one artefact the customer actually sees.
+  Both texts go into the prompt: the original is the message, the English
+  translation is only there so the model can read a language it handles less
+  well. See translation.py for why the rest of the pipeline runs on English.
 * Output is JSON so the UI can render a real subject line and body separately.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
+import translation
 from policy import ORDER_POLICY, RETURN_POLICY
 
 SUPPORT_AGENT = "Mira Castellanos"
@@ -53,11 +59,14 @@ MESSAGE ANALYSIS is an automated first-pass read of the incoming email: intent, 
 - Answer what the customer wrote, not only what the analysis summarised.
 
 ## Language
-Reply in the language the customer wrote in: English or Spanish, nothing else. LANGUAGE HINT gives the detected language; if the email is clearly in the other one, follow the email, not the hint. If it is neither English nor Spanish, reply in English. Write natural, native-sounding prose, not a translation of an English draft. In Spanish use "usted", the customer's first name, and Spanish quantity formats. Keep untranslatable identifiers such as order numbers, tracking numbers and product names in their original form.
+REPLY LANGUAGE at the top of the message names the language you write in. It comes from a language-identification service reading the customer's own words, not from a guess, so follow it even when the email is short or carries English product names.
+- Write natural, native-sounding prose in that language, not a translation of an English draft. Use the register a support agent uses in that market: "usted" in Spanish, "Sie" in German, "vous" in French, 敬語 in Japanese, 존댓말 in Korean, and local number, date and currency formats.
+- Keep untranslatable identifiers in their original form: order numbers, tracking numbers, carrier names, product names, email addresses.
+- When the customer did not write in English, an ENGLISH TRANSLATION block follows the email. It is a machine translation, produced so the rest of the pipeline can read the message; the INCOMING EMAIL is the real one. Read the translation to understand, answer the original, and never mention the translation or quote its wording back to the customer.
 
 ## Output format
 Return one JSON object and nothing else. No markdown fences, no commentary.
-{{"language": "en" | "es", "subject": "...", "body": "..."}}
+{{"language": "<ISO 639-1 code, the same one as REPLY LANGUAGE>", "subject": "...", "body": "..."}}
 - `subject`: a reply subject line. Keep the customer's own subject and prefix it with "Re: " when they wrote one; otherwise write a short specific one.
 - `body`: the full email as plain text. Use \\n\\n between paragraphs and \\n inside a list. Start with the greeting, end with the sign-off. No HTML, no markdown headings, no subject line inside the body.
 
@@ -68,29 +77,14 @@ Return one JSON object and nothing else. No markdown fences, no commentary.
 """
 
 
-_SPANISH_MARKERS = re.compile(
-    r"[áéíóúñ¿¡]|\b(hola|buenas|gracias|pedido|envío|envio|devolución|devolucion|reembolso|"
-    r"producto|compra|entrega|paquete|factura|garantía|garantia|necesito|quiero|por favor|"
-    r"cuándo|cuando|dónde|donde|el|la|los|las|mi|para|pero|porque|también|tambien|todavía|todavia)\b",
-    re.IGNORECASE,
-)
-_ENGLISH_MARKERS = re.compile(
-    r"\b(the|and|order|shipping|return|refund|please|thanks|thank you|hello|hi|delivery|"
-    r"package|warranty|need|want|when|where|but|because|still|would|could)\b",
-    re.IGNORECASE,
-)
-
-
 def detect_language(text: str) -> str:
-    """Cheap en/es discriminator. Only ever returns 'en' or 'es'."""
-    if not text or not text.strip():
-        return "en"
-    es = len(_SPANISH_MARKERS.findall(text))
-    en = len(_ENGLISH_MARKERS.findall(text))
-    # Accented characters and inverted punctuation are strong Spanish signals.
-    if re.search(r"[áéíóúñ¿¡]", text, re.IGNORECASE):
-        es += 3
-    return "es" if es > en else "en"
+    """轻量语种判别，转发给 translation 层。
+
+    权威判别来自翻译服务的 fasttext（见 translation.to_english()）；这个函数是给
+    "不值得为它调一次翻译服务"的路径用的——人工回信、前端提示这类地方，判错的代价
+    只是一个标签，而不是整条分析链路。
+    """
+    return translation.detect_language(text)
 
 
 def build_user_message(
@@ -101,7 +95,14 @@ def build_user_message(
     policy_facts: dict[str, Any],
     language: str,
     tag_block: str = "",
+    english: dict[str, str] | None = None,
 ) -> str:
+    """`language` 是**回信要用的语种**（客户原文的语种，见 translation.REPLY_LANGS）。
+
+    `english` 是这封信的英文机翻，只有原文不是英文时才传（translation.to_prompt_block()
+    负责判断）。两份文本一起进提示词：原文是"客户写的那封信"，译文只是给模型的一副
+    眼镜——所以译文块排在原文后面，并且在系统提示词里写明以原文为准。
+    """
     customer = context.get("customer") or {}
     product = context.get("product") or {}
     order = context.get("order") or {}
@@ -113,7 +114,14 @@ def build_user_message(
 
 """ if tag_block else ""
 
-    return f"""LANGUAGE HINT: {language}
+    translated = f"""
+
+ENGLISH TRANSLATION (machine translation of the email above — read it to understand, answer the original)
+Subject: {english.get("subject") or "(no subject)"}
+
+{english.get("body") or ""}""" if english else ""
+
+    return f"""REPLY LANGUAGE: {language} ({translation.language_name(language)})
 
 CUSTOMER
 {json.dumps(customer, ensure_ascii=False, indent=2)}
@@ -127,17 +135,32 @@ ORDER
 POLICY EVALUATION (authoritative, already calculated for today)
 {json.dumps(policy_facts, ensure_ascii=False, indent=2)}
 
-{analysis}INCOMING EMAIL
+{analysis}INCOMING EMAIL (as the customer wrote it)
 Subject: {subject or "(no subject)"}
 
-{body}
+{body}{translated}
 
 ---
-Write the reply email now. Return only the JSON object.
+Write the reply email now, in {translation.language_name(language)}. Return only the JSON object.
 """
+
+
+# 模型没给主题时的兜底主题。回信语种是客户的语种，兜底主题当然也得是——一封德语
+# 回信配一句英文 "About your enquiry" 是最显眼的机器痕迹。
+_FALLBACK_SUBJECTS = {
+    "en": "About your enquiry",
+    "es": "Sobre su consulta",
+    "de": "Zu Ihrer Anfrage",
+    "fr": "Au sujet de votre demande",
+    "it": "In merito alla sua richiesta",
+    "pt": "Sobre a sua mensagem",
+    "zh": "关于您的咨询",
+    "ja": "お問い合わせについて",
+    "ko": "문의하신 내용에 대하여",
+}
 
 
 def fallback_subject(subject: str, language: str) -> str:
     if subject.strip():
         return subject if subject.lower().startswith("re:") else f"Re: {subject.strip()}"
-    return "Sobre su consulta" if language == "es" else "About your enquiry"
+    return _FALLBACK_SUBJECTS.get(language, _FALLBACK_SUBJECTS[translation.BASE_LANG])

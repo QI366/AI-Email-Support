@@ -1,8 +1,24 @@
 """
 Step 1 of the two-step reply pipeline: read the email before writing to it.
 
-    incoming email -> tags.analyse()  -> intent / sentiment / urgency / entities
+    incoming email -> translation.to_english()  -> 英文基准文本 + 原文语种
+                   -> tags.analyse()  -> intent / sentiment / urgency / entities
                    -> prompts + llm   -> the reply the customer receives
+
+-----
+输入是英文基准文本，不是原文
+-----
+`analyse()` 拿到的 subject / body 是 translation.to_english() 产出的**英文**文本
+（原文本来就是英文时它就是原文本身）。这一层里三个环节都只在英文上可靠：
+
+  * 本地情绪模型只覆盖英文，非英文输入返回 AMBIGUOUS + 全 0 分；
+  * `_apply_review_rules()` 的关键词表（lawyer / chargeback / injured…）是英文字面量，
+    西语来信里的 "abogado" 一条都命中不了；
+  * 分类模板本身是英文写的。
+
+代价是 `language` 标签不能再由大模型来判——它读到的是译文，只会回答 "en"。所以
+语种由 translation 层的判定（fasttext）确定性写入，大模型那一份存进 `model_language`
+留档，和 sentiment / needs_review 的处理方式一致：两路判断都留着，事后能对账。
 
 -----
 分类机制（不是黑箱）
@@ -69,6 +85,7 @@ from jinja2 import Environment, StrictUndefined
 import emotion_recognition as emotion
 import llm
 import token_cost
+import translation
 
 # Step 1 可以单独配置一个模型（比如用更便宜的模型做分类），不设置时回退到
 # llm.config() 里的默认模型。token_cost 那边用同名的 "tags" step 去查对应的
@@ -94,7 +111,9 @@ INTENTS = (
 # 这里只做引用——服务端加一个簇时不用两头改。
 SENTIMENTS = emotion.SENTIMENTS
 URGENCIES = ("low", "medium", "high", "critical")
-LANGUAGES = ("en", "es", "other")
+# 语种词表 = 翻译服务支持的 9 种 + "other"，同样只定义在 translation.py 一处。
+# 这个字段不由大模型填（它读到的是译文），由 translation 层确定性写入。
+LANGUAGES = translation.TAG_LANGUAGES
 ENTITY_FIELDS = ("product_mentioned", "issue_mentioned", "deadline_mentioned")
 # 歧义程度clear | moderate | high | critical
 AMBIGUITY_LEVELS = ("clear", "moderate", "high", "critical")
@@ -174,13 +193,40 @@ def _as_context(block: dict[str, Any] | None) -> str:
     return json.dumps(block, ensure_ascii=False, indent=2) if block else ""
 
 
-def build_user_message(*, subject: str, body: str, context: dict[str, Any] | None) -> str:
+def translation_note(source_lang: str | None, *, translated: bool) -> str:
+    """告诉分类模型"你读到的是机翻"。原文本来就是英文时返回空串，模板整块不渲染。
+
+    机翻文本读起来常常生硬、习语被直译，模型很容易把这种别扭当成"买家表达不清"，
+    从而抬高 ambiguity_level、压低 intent_confidence——这一句话就是防这个的。
+    """
+    if not translated or not source_lang:
+        return ""
+    name = translation.language_name(source_lang)
+    return (
+        f"The buyer wrote in {name} (`{source_lang}`). The message above is an automatic "
+        f"English translation of that email, provided so this analyzer can read it.\n"
+        f"- Classify the buyer's intent, sentiment and urgency from the translation.\n"
+        f"- Do NOT treat translation artefacts (stilted phrasing, literally translated "
+        f"idioms) as buyer ambiguity — judge clarity by what the buyer meant.\n"
+        f"- Report `language` as the buyer's original language: `{source_lang}`.\n"
+        f"- Quote `evidence` from the translated text; it is the only text you have."
+    )
+
+
+def build_user_message(
+    *,
+    subject: str,
+    body: str,
+    context: dict[str, Any] | None,
+    note: str = "",
+) -> str:
     ctx = context or {}
     buyer_message = f"Subject: {subject}\n\n{body}" if subject.strip() else body
     return _USER_TEMPLATE.render(
         buyer_message=buyer_message.strip(),
         product_context=_as_context(ctx.get("product")),
         order_context=_as_context(ctx.get("order")),
+        translation_note=note,
     )
 
 
@@ -379,6 +425,24 @@ def _apply_emotion(tags: dict[str, Any], result: Any) -> None:
     tags["emotion"] = {"error": detail[:300]}
 
 
+def _apply_language(tags: dict[str, Any], source_lang: str | None) -> None:
+    """用 translation 层的语种判定覆盖 language，就地改写 tags。
+
+    和 _apply_emotion() 同一个套路：确定性的判定盖过模型自评，模型那一份留档。
+    这里的覆盖是必须的而不是可选的——大模型读到的是英文译文，它给的 language 只会
+    是 "en"，把它写进标签等于把每一封外语来信都记成英文来信。
+
+      model_language —— 大模型读译文得到的语种，几乎恒为 en，留着能看出译文是否生效
+      language       —— 原文语种，来自翻译服务的 fasttext（服务不可用时是本地正则）
+
+    这个语种是谁判的（服务端还是本地兜底）记在 thread 的 translation 块里，
+    不在标签里重复一份。
+    """
+    tags["model_language"] = tags.get("language")
+    if source_lang:
+        tags["language"] = _one_of(source_lang, LANGUAGES, translation.UNKNOWN_LANG)
+
+
 def _keyword_hits(text: str, keywords: tuple[str, ...]) -> list[str]:
     """在文本里做大小写不敏感的关键词匹配，返回命中的关键词（可能不止一个）。"""
     low = text.lower()
@@ -494,8 +558,15 @@ async def analyse(
     body: str,
     context: dict[str, Any] | None,
     policy_facts: dict[str, Any] | None = None,
+    source_lang: str | None = None,
+    translated: bool = False,
 ) -> dict[str, Any]:
-    """对一封邮件做分类。入口函数，永不抛异常（详见模块文档字符串）。"""
+    """对一封邮件做分类。入口函数，永不抛异常（详见模块文档字符串）。
+
+    subject / body 传的是**英文基准文本**（translation.to_english() 的产出），
+    `source_lang` 是原文语种、`translated` 说明这份文本是不是机翻来的。三个下游
+    环节——大模型分类、本地情绪模型、英文关键词规则——都吃这份英文文本。
+    """
     started = time.perf_counter()
 
     # 步骤 A：两个分类器并发跑——大模型读内容（意图/紧急度/实体/摘要），本地模型
@@ -504,7 +575,11 @@ async def analyse(
     # 已经拿到的结果跟着丢掉。
     raw, emotion_result = await asyncio.gather(
         llm.complete(
-            SYSTEM_PROMPT, build_user_message(subject=subject, body=body, context=context),
+            SYSTEM_PROMPT,
+            build_user_message(
+                subject=subject, body=body, context=context,
+                note=translation_note(source_lang, translated=translated),
+            ),
             model=MODEL_NAME_TAGS,
         ),
         emotion.classify(f"{subject}\n\n{body}".strip() if subject.strip() else body),
@@ -539,8 +614,11 @@ async def analyse(
     # 步骤 C：情绪以本地模型为准覆盖掉大模型的自评（服务不可用时保留兜底值）。
     # 必须排在规则引擎之前——下面的复核规则要读 sentiment 和 emotion.l1。
     _apply_emotion(tags, emotion_result)
+    # 语种同理：以 translation 层的判定为准，大模型读的是译文，判不了原文语种。
+    _apply_language(tags, source_lang)
 
-    # 步骤 D：确定性规则引擎复核——不管模型自己判没判 needs_review，命中规则就强制转人工
+    # 步骤 D：确定性规则引擎复核——不管模型自己判没判 needs_review，命中规则就强制转人工。
+    # 这里读到的 subject/body 是英文基准文本，所以那几张英文关键词表对外语来信同样有效。
     _apply_review_rules(tags, subject=subject, body=body, context=context, policy_facts=policy_facts)
 
     tags["token_usage"] = usage

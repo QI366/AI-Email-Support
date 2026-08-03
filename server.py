@@ -8,12 +8,24 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
+
+# 控制台按 UTF-8 输出，编不出来的字符降级成替代字符而不是抛异常。
+# Windows 的默认控制台编码是 GBK，链路里那几条调试 print（邮件正文、标签、模型
+# 原始响应）一旦遇到 GBK 里没有的字符——西语的 ¿、德语的 ß、日文假名——就会抛
+# UnicodeEncodeError，而它是在请求处理函数里抛的，结果是**整个请求 500**：一条
+# 日志把一封已经写好的回信弄丢了。信箱现在收 9 种语言的来信，这一行是必须的。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # pragma: no cover - 非标准流（被重定向/被包装）
+        pass
 
 
 # --------------------------------------------------------------------------
@@ -48,6 +60,7 @@ import scenarios  # noqa: E402
 import store  # noqa: E402
 import tags  # noqa: E402
 import token_cost  # noqa: E402
+import translation  # noqa: E402
 
 # Step 2（写回复）可以单独配置一个模型，跟 Step 1 打标签的模型不必是同一个；
 # 不设置时回退到 llm.config() 里的默认模型。token_cost 用同名的 "reply" step
@@ -59,6 +72,10 @@ MAX_BODY = 4000
 # 情绪测试台的单次输入上限。比邮件正文短：这里是拿一段话试模型，不是发一封信，
 # 而且服务端按句子切分后再池化，几千字的输入只会把一次"试一下"拖成好几秒。
 MAX_EMOTION_TEXT = 2000
+# 翻译测试台的单次输入上限，比情绪测试台还紧。1.8B 的模型跑在 CPU 上，实测 301 字
+# 要 35 秒（translation.MEASURED），耗时几乎只跟输出 token 数走。600 字是服务端一个
+# 分片的长度，也是"一次试用还等得起"的上限——真要看长信怎么走链路，发一封邮件更合适。
+MAX_TRANSLATION_TEXT = 600
 
 app = FastAPI(title="Helios Support Mailbox", version="1.0.0")
 store.init()
@@ -101,6 +118,18 @@ class EmotionTestRequest(BaseModel):
 class EmotionFeedbackRequest(BaseModel):
     verdict: str | None = Field(default=None)          # 'correct' | 'wrong' | None(撤回评价)
     true_labels: list[str] = Field(default_factory=list)
+    note: str = Field(default="", max_length=400)
+
+
+class TranslationTestRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_TRANSLATION_TEXT)
+    sample_id: str | None = Field(default=None, max_length=60)
+
+
+class TranslationFeedbackRequest(BaseModel):
+    verdict: str | None = Field(default=None)          # 'good' | 'bad' | None(撤回对译文的评价)
+    true_lang: str | None = Field(default=None, max_length=12)
+    suggested_translation: str = Field(default="", max_length=4000)
     note: str = Field(default="", max_length=400)
 
 
@@ -192,17 +221,26 @@ async def send_mail(payload: SendRequest, request: Request) -> JSONResponse:
     subject = payload.subject.strip()
     who = identity(request)
     facts = policy.evaluate(context, today)
-    # 正则匹配判断邮件语言
-    language = prompts.detect_language(f"{subject}\n{body}")
-    # print(f"识别到的邮件语言: {language}")
+
+    # Step 0: 统一翻译成英文基准。整条分析链路（打标签的模板、本地情绪模型、人工
+    # 复核的英文关键词表）都只在英文上可靠，所以先把每一封信拉到同一种语言上，再
+    # 往下走。永不抛异常：翻译服务挂了就退回原文 + 本地语种判别，链路照常跑完，
+    # 只是情绪和关键词规则在非英文输入上会退化（见 translation.py）。
+    english = await translation.to_english(subject=subject, body=body)
+    # 原文语种。权威判定来自翻译服务的 fasttext，服务不可用时是本地正则的兜底值。
+    language = english["source_lang"]
+    print(f"翻译层: source_lang={language} translated={english['translated']} "
+          f"skipped={english['skipped']} latency_ms={english['latency_ms']} error={english['error']}")
 
     # Step 1: classify the incoming email. Never raises, so the thread below is
     # still recorded even when the analyser is down.
-    # 调用模型给邮件打标签
-    # print(f"邮件内容主题: {subject}，邮件内容: {body}")
+    # 传进去的是英文基准文本，不是原文——原文只在写回信时才用到。
     # policy_facts 一起传进去，人工复核规则引擎要用这些确定性事实（SLA 是否违约、
     # 是否超出退货/保修窗口）来判断，而不是只看模型自己的判断
-    email_tags = await tags.analyse(subject=subject, body=body, context=context, policy_facts=facts)
+    email_tags = await tags.analyse(
+        subject=english["subject"], body=english["body"], context=context, policy_facts=facts,
+        source_lang=language, translated=english["translated"],
+    )
     # print(f"抽取出来的邮件标签: {email_tags}")
 
     thread_id = store.create_thread(
@@ -213,6 +251,7 @@ async def send_mail(payload: SendRequest, request: Request) -> JSONResponse:
         context_json=json.dumps(context, ensure_ascii=False),
         policy_json=json.dumps(facts, ensure_ascii=False),
         tags_json=json.dumps(email_tags, ensure_ascii=False),
+        translation_json=json.dumps(english, ensure_ascii=False),
         in_subject=subject,
         in_body=body,
         in_language=language,
@@ -221,9 +260,14 @@ async def send_mail(payload: SendRequest, request: Request) -> JSONResponse:
     )
 
     # Step 2: write the reply, with the tags injected alongside the email.
+    # 回信用客户自己的语种写（不是把英文回信机翻回去——机翻回去的信读起来就是机翻）。
+    # 语种不在服务支持的 9 种之内时退回英文：模型写得出来是一回事，我们能不能对这封
+    # 信的质量负责是另一回事。
+    reply_lang = language if language in translation.REPLY_LANGS else translation.BASE_LANG
     user_message = prompts.build_user_message(
-        subject=subject, body=body, context=context, policy_facts=facts, language=language,
+        subject=subject, body=body, context=context, policy_facts=facts, language=reply_lang,
         tag_block=tags.to_prompt_block(email_tags),
+        english=translation.to_prompt_block(english),
     )
 
     # 这封邮件的总成本 = Step 1（打标签，已经在 tags.analyse() 里算过）+ Step 2（写回复）。
@@ -248,7 +292,8 @@ async def send_mail(payload: SendRequest, request: Request) -> JSONResponse:
     cost_tracker.add_response(raw, step="reply")
 
     latency_ms = int((time.perf_counter() - started) * 1000)
-    reply_language = reply["language"] if reply["language"] in {"en", "es"} else language
+    # 模型自报的语种只在它落在支持列表里时才采信，否则以我们判定的回信语种为准
+    reply_language = reply["language"] if reply["language"] in translation.REPLY_LANGS else reply_lang
     reply_subject = reply["subject"] or prompts.fallback_subject(subject, reply_language)
 
     store.finish_thread(
@@ -393,14 +438,151 @@ async def emotion_stats(request: Request, scope: str = "all") -> dict[str, Any]:
     return {"scope": scope, "vocabulary": list(emotion.SENTIMENTS), **store.emotion_test_stats(user_filter)}
 
 
+# --------------------------------------------------------------------------
+# 翻译模型测试台：拿一段文字直接试本地翻译模型，人给对错反馈，记录所有人可见
+# --------------------------------------------------------------------------
+@app.get("/api/translation/meta")
+async def translation_meta() -> dict[str, Any]:
+    """模型档案 + 链路规格 + 语种词表 + 示例语料 + 服务当前状态。页面的说明书部分。
+
+    和情绪那边一样不返回 TRANSLATION_API_URL（内网地址）；但这里**会**去问一次服务
+    自己的 /health 和 /languages——说明书上写死一个模型名没有意义，真正该回答的是
+    "此刻这个端点后面加载的是哪个模型、跑在什么设备上"。探针永不抛异常，问不到就
+    ok=False，页面退回讲静态档案。
+    """
+    cfg = translation.config()
+    return {
+        "enabled": cfg["enabled"],
+        "timeout": cfg["timeout"],
+        "skip_english": cfg["skip_english"],
+        "model": translation.model_card(),
+        "measured": {
+            "date": translation.MEASURED["date"],
+            "device": translation.MEASURED["device"],
+            "runs": [dict(r) for r in translation.MEASURED["runs"]],
+        },
+        "spec": translation.spec(),
+        "vocabulary": translation.vocabulary(),
+        "samples": [dict(s) for s in translation.SAMPLES],
+        "max_chars": MAX_TRANSLATION_TEXT,
+        "probe": await translation.probe(),
+    }
+
+
+@app.post("/api/translation/test")
+async def translation_test(payload: TranslationTestRequest, request: Request) -> dict[str, Any]:
+    """跑一次翻译并落库。
+
+    调用失败**也要落库**（error 列写原因）——"服务在这段文字上给不出结果"本身就是
+    测试结果，丢掉它等于让测试台只展示模型顺利的那一面。所以这里不抛 5xx。
+    """
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Type something to translate.")
+
+    who = identity(request)
+    sample_id = payload.sample_id if payload.sample_id in translation.SAMPLE_IDS else None
+
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    try:
+        result = await translation.inspect(text)
+    except translation.TranslationError as exc:
+        error = str(exc)[:400]
+    except Exception as exc:  # noqa: BLE001 - 测试台不该被一个意外异常打死
+        error = f"{type(exc).__name__}: {exc}"[:400]
+
+    test_id = store.create_translation_test(
+        user_id=who["user_id"],
+        ip=who["ip"],
+        text=text,
+        sample_id=sample_id,
+        result_json=json.dumps(result, ensure_ascii=False) if result else None,
+        source_lang=(result or {}).get("source_lang"),
+        raw_lang=(result or {}).get("raw_lang"),
+        local_lang=(result or {}).get("local_lang"),
+        char_count=(result or {}).get("char_count") or len(text),
+        latency_ms=(result or {}).get("latency_ms"),
+        error=error,
+        created_at=time.time(),
+    )
+    return store.get_translation_test(test_id) or {}
+
+
+@app.post("/api/translation/tests/{test_id}/feedback")
+async def translation_feedback(
+    test_id: int, payload: TranslationFeedbackRequest, request: Request
+) -> dict[str, Any]:
+    verdict = payload.verdict if payload.verdict in ("good", "bad") else None
+    # 真实语种过白名单：只能是我们开放的 9 种之一，或者 other（"不在这 9 种里"）
+    true_lang = payload.true_lang if payload.true_lang in translation.TAG_LANGUAGES else None
+    suggested_translation = payload.suggested_translation.strip()
+    if verdict is None and true_lang is None and not suggested_translation and not payload.note.strip():
+        raise HTTPException(status_code=400, detail="Say something about the result first.")
+
+    who = identity(request)
+    if not store.set_translation_feedback(
+        test_id,
+        verdict=verdict,
+        true_lang=true_lang,
+        suggested_translation=suggested_translation,
+        note=payload.note.strip(),
+        user_id=who["user_id"],
+    ):
+        raise HTTPException(status_code=404, detail="Test not found")
+    return store.get_translation_test(test_id) or {}
+
+
+@app.get("/api/translation/tests")
+async def translation_tests(request: Request, scope: str = "all", limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    who = identity(request)
+    limit = max(1, min(limit, 300))
+    user_filter = who["user_id"] if scope == "mine" else None
+    return {
+        "scope": scope,
+        "user_id": who["user_id"],
+        "tests": store.list_translation_tests(user_filter, limit=limit, offset=offset),
+    }
+
+
+@app.get("/api/translation/tests/{test_id}")
+async def translation_test_detail(test_id: int) -> dict[str, Any]:
+    """单条测试。给 ?tx=<id> 这种分享链接用——和情绪测试台同一个理由：
+    "你看它把这句话读成哪国语言了"得能指到具体哪一条。"""
+    test = store.get_translation_test(test_id)
+    if test is None:
+        raise HTTPException(status_code=404, detail="Test not found")
+    return test
+
+
+@app.get("/api/translation/stats")
+async def translation_stats(request: Request, scope: str = "all") -> dict[str, Any]:
+    who = identity(request)
+    user_filter = who["user_id"] if scope == "mine" else None
+    return {
+        "scope": scope,
+        "vocabulary": list(translation.TAG_LANGUAGES),
+        **store.translation_test_stats(user_filter),
+    }
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     cfg = llm.config()
+    tcfg = translation.config()
     return {
         "ok": True,
         "model": cfg["model"],
         "base_url": cfg["base_url"],
         "api_key_loaded": cfg["has_key"],
+        # 翻译层：只说"配没配、支持哪些语种"，不回内网地址——和情绪服务同一个口径，
+        # 页面需要知道的是"来信能不能被读懂"，不是它指到哪台机器。
+        "translation": {
+            "enabled": tcfg["enabled"],
+            "base_lang": tcfg["base_lang"],
+            "languages": tcfg["languages"],
+            "skip_english": tcfg["skip_english"],
+        },
         **store.stats(),
     }
 

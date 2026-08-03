@@ -4,9 +4,6 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Helios Support Mailbox</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/static/styles.css" />
 <link rel="icon" href="/static/img/favicon.svg" />
 </head>
@@ -53,6 +50,9 @@
     </button>
     <button class="rail__item" data-view="emotion">
       <span data-i18n="view_emotion">Emotion model</span><span class="rail__count" id="count-emotion">0</span>
+    </button>
+    <button class="rail__item" data-view="translation">
+      <span data-i18n="view_translation">Translation model</span><span class="rail__count" id="count-translation">0</span>
     </button>
 
     <p class="rail__label rail__label--gap is-mailonly" data-i18n="mailboxes">Mailboxes</p>
@@ -131,6 +131,29 @@
     <div class="tagview__body" id="emotion-body"></div>
   </section>
 
+  <!-- 翻译识别：和情绪页同构的五个小页 —— 模型 / 管线 / 语种 / 试一段 / 测试记录 -->
+  <section class="txview" id="translation-view" data-i18n-label="view_translation">
+    <header class="policy__head">
+      <div>
+        <h1 data-i18n="tx_view_title">Translation</h1>
+        <p id="tx-view-desc" data-i18n="tx_view_desc">The local translation model: what it is, what the pipeline does to an email, and how it does on real text.</p>
+      </div>
+      <!-- 按人筛选只对"测试记录"页有意义，其余四页由 renderTranslationView() 隐藏 -->
+      <div class="tagview__scope" id="tx-scope" role="group" data-i18n-label="tx_scope" hidden>
+        <button type="button" data-txscope="all" data-i18n="everyone">Everyone</button>
+        <button type="button" data-txscope="mine" data-i18n="my_mail">Mine</button>
+      </div>
+    </header>
+    <nav class="emotabs" id="tx-tabs" role="tablist" data-i18n-label="tx_tabs">
+      <button type="button" role="tab" data-txtab="model" data-i18n="tx_tab_model">Model</button>
+      <button type="button" role="tab" data-txtab="pipeline" data-i18n="tx_tab_pipeline">Pipeline</button>
+      <button type="button" role="tab" data-txtab="langs" data-i18n="tx_tab_langs">Languages</button>
+      <button type="button" role="tab" data-txtab="bench" data-i18n="tx_tab_bench">Bench</button>
+      <button type="button" role="tab" data-txtab="log" data-i18n="tx_tab_log">Test log</button>
+    </nav>
+    <div class="tagview__body" id="translation-body"></div>
+  </section>
+
 </main>
 
 <!-- ---------------------------------------------------------------- compose -->
@@ -164,7 +187,8 @@
         <textarea id="c-body" maxlength="4000" rows="12" data-i18n-ph="ph_body" placeholder="Select an order above and we'll drop in a sample email you can edit."></textarea>
         <div class="compose-foot">
           <div class="compose-foot__left">
-            <span class="lang-chip" id="lang-chip" data-i18n="chip_en">Detected: English</span>
+            <!-- 文案由 updateLangChip() 填（要带上检测到的语种名），不走 data-i18n -->
+            <span class="lang-chip" id="lang-chip">Detected: English → reply in English</span>
             <button type="button" class="linkbtn" id="reset-sample" data-i18n="reset_sample">Reset to sample text</button>
           </div>
           <button type="button" class="btn btn--primary btn--send" id="send-mail" data-i18n="send_email" disabled>Send email</button>

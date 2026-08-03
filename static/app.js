@@ -27,6 +27,16 @@ const state = {
   emoBusy: false,
   emoPick: [],          // true labels ticked in the feedback form
   emoVerdict: null,     // 'correct' | 'wrong' | null, before it is saved
+  txTab: 'model',       // model | pipeline | langs | bench | log — the five sub-pages
+  txScope: 'all',       // same shared board as the emotion bench
+  txMeta: null,         // model card + pipeline spec + samples from /api/translation/meta
+  txTests: [],
+  txStats: null,
+  txOpen: null,         // the test currently loaded into the result card
+  txDraft: '',
+  txBusy: false,
+  txVerdict: null,      // 'good' | 'bad' | null — the translation itself
+  txLang: null,         // the language the reader says it actually was
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -68,10 +78,16 @@ const I18N = {
     tag_not_delivered: 'not delivered',
     tag_sending: 'sending',
     back_to_list: '← Back to list',
-    written_es: 'written in Spanish',
-    written_en: 'written in English',
+    written_in: (lang) => `written in ${lang}`,
     lang_es: 'Spanish',
     lang_en: 'English',
+    baseline_title: 'English baseline',
+    baseline_ms: (ms) => `${(ms / 1000).toFixed(1)}s`,
+    baseline_note: (lang) => `The email arrived in ${lang}. Everything downstream — the tags below, the emotion model and the review keywords — reads this machine translation, because those models only work in English. The reply is still written in ${lang}.`,
+    baseline_result_title: 'Translation result',
+    baseline_result_note: (lang) => `Translated into English from ${lang}.`,
+    baseline_subject: 'Subject',
+    baseline_failed: (err) => `The translation service could not be reached, so the analysis below ran on the original text. Sentiment and the review keywords degrade on non-English mail. ${err}`,
     reply_writing: 'Mira is writing a reply',
     reply_failed: (err) => `The reply could not be generated. ${err}`,
     order_context_attached: 'Order context attached',
@@ -443,8 +459,266 @@ const I18N = {
     emo_verdict_correct: 'Correct',
     emo_verdict_wrong: 'Wrong',
     emo_toast_test_fail: (msg) => `Could not run that test: ${msg}`,
+
+    view_translation: 'Translation',
+    tx_view_title: 'Translation',
+    tx_view_desc: 'The local translation model: what it is, what the pipeline does to an email, and how it does on real text.',
+    tx_scope: 'Whose tests to show',
+    tx_tabs: 'Translation pages',
+    tx_tab_model: 'The model',
+    tx_tab_pipeline: 'Pipeline',
+    tx_tab_langs: 'Languages',
+    tx_tab_bench: 'Bench',
+    tx_tab_log: 'Test log',
+    tx_desc_model: 'The local model every non-English email passes through before anything else reads it.',
+    tx_desc_pipeline: 'What happens to an email between arriving and being tagged — nine steps, exactly one of them the model.',
+    tx_desc_langs: 'The nine languages this mailbox serves, who reads the English baseline, and what language the customer is answered in.',
+    tx_desc_bench: 'Run any text through the translation service and say whether it read it right. Every test and verdict is shared with everyone.',
+    tx_desc_log: 'Every translation anyone has tested, and what they add up to.',
+    tx_off: 'No TRANSLATION_API_URL is configured, so the bench cannot reach the service. Until it is set, mail is analysed in whatever language it arrived in — sentiment and the review keywords degrade on anything that is not English.',
+
+    tx_probe_live: 'service answering',
+    tx_probe_down_short: 'service down',
+    tx_hero_eyebrow: 'local model · step 0 of the chain',
+    tx_stat_size: 'Size',
+    tx_stat_size_sub: 'dense, runs on our own hardware',
+    tx_stat_langs: 'Languages',
+    tx_stat_langs_sub: 'served here / in the model',
+    tx_stat_ctx: 'Context',
+    tx_stat_ctx_sub: 'tokens per generation',
+    tx_stat_call: 'One call',
+    tx_stat_call_sub: (device) => `measured range on ${device}`,
+    tx_deploy_title: 'What is actually loaded',
+    tx_deploy_sub: 'asked of the endpoint just now — a model card cannot tell you this',
+    tx_deploy_model: 'Model path',
+    tx_deploy_device: 'Device',
+    tx_deploy_lid: 'Language id',
+    tx_deploy_langs: 'Languages served',
+    tx_deploy_endpoint: 'Endpoint',
+    tx_deploy_drift: (codes) => `The service and our own vocabulary disagree about these: ${codes}. One side changed without the other — until they match, either a language is being tagged that we cannot reply in, or one the service handles is being refused.`,
+    tx_vendor_title: 'What the vendor published',
+    tx_vendor_sub: 'their evaluation, on their benchmarks — none of it measured here',
+    tx_cost_title: 'What it costs on this box',
+    tx_who_client_d: 'our code',
+    tx_who_service_d: 'the wrapper around the model',
+    tx_who_model_d: 'the weights themselves',
+    tx_group_normal: 'Ordinary mail',
+    tx_group_normal_d: 'one per language we serve',
+    tx_group_edge: 'The known failures',
+    tx_group_edge_d: 'each reproduces one of the behaviours on the pipeline page',
+    tx_recent_title: 'Recently run',
+    tx_recent_sub: 'the last few tests anyone put through — click one to open it',
+    tx_recent_empty: 'Nothing has been run yet. Pick a sample above, or paste your own text.',
+    tx_flag_k: 'disagreement',
+    tx_flag_k_ok: 'agreed',
+    tx_flag_agree: (lang) => `The service and the local check both read this as ${lang}, so the reply would go out in that language.`,
+    tx_flag_overridden: (service, final) => `The service said ${service}; the local script check overrode it to ${final}. This is the known failure mode — the translation can still be perfect, but the language field would have been wrong.`,
+    tx_flag_split: (service, local) => `The service said ${service} and the local check said ${local}. The service wins by rule, so the reply would go out in ${service} — if that is wrong, this is where it went wrong.`,
+    tx_probe_down: (err) => `service not answering · ${err}`,
+    tx_probe_ready: 'ready',
+    tx_probe_notready: 'not loaded',
+
+    tx_model_title: 'The model',
+    tx_model_sub: 'a local translation model, not the language model that writes the replies',
+    tx_model_lede: 'Every email that is not already English is translated before anything else looks at it. Not for the customer — they never see this text — but because the emotion model, the manual-review keyword rules and the tagging template are all English-only. This layer is what lets one English-shaped analysis chain serve a nine-language mailbox.',
+    tx_spec_arch: 'Architecture',
+    tx_spec_arch_v: 'a general LM prompted to translate, not a dedicated translation network',
+    tx_spec_context: 'Context',
+    tx_spec_context_v: (n) => `${n} tokens per generation`,
+    tx_spec_decoding: 'Suggested decoding',
+    tx_spec_serving: 'Serving',
+    tx_spec_serving_on: (t) => `reachable over HTTP · ${t}s timeout`,
+    tx_spec_serving_off: 'no endpoint configured',
+    tx_model_why: 'Because it is a general language model rather than an encoder-decoder translator, it takes instructions — terminology, tone, keeping structure intact. It also means the vendor\'s own suggested decoding runs at temperature 0.7: the same email translated twice can come back worded differently. The tags read the translation, so that variance is real. This is the one place in the chain where the same input need not give the same output.',
+    tx_link_paper: 'technical report',
+    tx_link_repo: 'repository',
+
+    tx_family_title: 'The family',
+    tx_family_sub: 'three sizes were published; the 1.8B is the one that fits on a CPU box',
+    tx_th_variant: 'Variant',
+    tx_th_kind: 'Kind',
+    tx_th_size: 'Params',
+    tx_family_ours: 'ours',
+
+    tx_claim_beats_commercial: 'Overall, beats mainstream commercial translation APIs such as Microsoft\'s and Doubao\'s.',
+    tx_claim_beats_open: 'In fast-thinking mode, beats open models such as DeepSeek-V4-Pro and Kimi K2.6.',
+    tx_claim_quantized: 'At 1.25-bit quantization it needs 440 MB of storage and runs about 1.5× faster.',
+    tx_measured_sub: (date, device) => `direct calls to our own endpoint on ${date} · ${device}, no concurrency`,
+    tx_th_case: 'Text',
+    tx_th_chars: 'Chars',
+    tx_th_segments: 'Pieces',
+    tx_th_ms: 'Wall time',
+    tx_measured_note: 'Latency tracks the number of tokens generated, not the length of the input: an eleven-character subject line still costs three and a half seconds, because it is still a full forward pass decoded one token at a time. That is why production skips the call outright when the email is already English.',
+
+    tx_chain_title: 'One email, nine steps',
+    tx_chain_sub: 'exactly one of them is the model; four of the other eight are our own code',
+    tx_who_client: 'ours',
+    tx_who_service: 'service',
+    tx_who_model: 'model',
+    tx_step_gate_t: 'Is this already English?',
+    tx_step_gate_d: 'A local check decides whether to call the service at all. Confident English skips it — the model rewrites English input rather than passing it through, and that rewrite would cost a full call.',
+    tx_step_pack_t: 'The subject goes in as the first paragraph',
+    tx_step_pack_d: 'The subject is prepended to the body with a blank line between them, so one call translates both. Paragraph counts survive the round trip, so the subject comes back as paragraph 0.',
+    tx_step_paragraphs_t: 'Split on blank lines',
+    tx_step_paragraphs_d: 'The service splits the text into paragraphs and keeps their indexes — which is what makes the subject trick above work at all.',
+    tx_step_segments_t: 'Split the long paragraphs',
+    tx_step_segments_d: (n) => `Paragraphs longer than ${n} characters are cut into pieces, and every piece is translated on its own.`,
+    tx_step_lid_t: 'Identify the language, piece by piece',
+    tx_step_lid_d: 'fasttext lid.176 labels each piece separately. Pieces of one email can disagree, and the whole-email answer is not a vote — a two-word subject line can decide it.',
+    tx_step_generate_t: 'Translate each piece',
+    tx_step_generate_d: 'The only model call in the chain. Everything above and below it is deterministic code.',
+    tx_step_rejoin_t: 'Reassemble by paragraph index',
+    tx_step_rejoin_d: 'Pieces are joined back into paragraphs and paragraphs into one text, so what comes out has the same shape as what went in.',
+    tx_step_unpack_t: 'Take the subject back out',
+    tx_step_unpack_d: 'Paragraph 0 is the translated subject and the rest is the body. If the counts do not line up the subject keeps its original wording — better an untranslated subject than the first line of the body filed as one.',
+    tx_step_arbitrate_t: 'Decide the language',
+    tx_step_arbitrate_d: 'The service\'s answer wins, with one exception: when it says English but the text is plainly in a non-Latin script, the local check wins. That combination is a known failure mode, not a close call.',
+    tx_chain_note: 'None of this raises. If the service is down the original text goes downstream unchanged with the local language guess attached, and the reason is recorded on the thread. The customer still gets a reply — the analysis behind it is just weaker.',
+
+    tx_contract_title: 'What comes back',
+    tx_contract_sub: 'field names verbatim — these are the keys you would grep for in the service log',
+    tx_th_field: 'Field',
+    tx_th_meaning: 'What it is',
+    tx_field_ok: 'False means the service refused the request; the reason is alongside it.',
+    tx_field_detected_primary_language: 'The language the email as a whole was taken to be. Read the per-piece labels before trusting it.',
+    tx_field_translated_text: 'The whole translation, paragraphs joined by blank lines.',
+    tx_field_paragraphs: 'One translation per paragraph, indexed. This is what the subject line is recovered from.',
+    tx_field_segments: 'Per piece: the source text, its translation, the language detected for it, and the language actually used to translate it.',
+    tx_field_input_char_count: 'How many characters the service received.',
+    tx_field_input_source_lang: 'The source language we forced, when we force one. Normally null — we let it detect.',
+    tx_field_input_target_lang: 'Always en here. English is the baseline everything downstream reads.',
+
+    tx_known_title: 'Four things it does that the contract does not mention',
+    tx_known_sub: 'each one measured against our own endpoint, with the sample that reproduces it',
+    tx_known_english_rewrite_t: 'English in, English out is not the identity',
+    tx_known_english_rewrite_d: 'Feed it English and it returns rewritten English rather than the sentence you sent. Harmless on its own, but it rewords the customer, and it costs a full call to do it. This is the whole reason step 1 exists.',
+    tx_known_unsupported_as_en_t: 'Languages outside the served list come back labelled English',
+    tx_known_unsupported_as_en_d: 'A Russian email is translated correctly — the model reaches well past the nine we serve — but the language field says en and the per-piece label is empty. Taken at face value that files a Russian customer as an English one, and answers them in English by mistake rather than by fallback.',
+    tx_known_short_segment_lid_t: 'Short pieces get unreliable language labels',
+    tx_known_short_segment_lid_d: 'Identifying a language from two or three words is close to a coin flip. Because the subject line is a paragraph of its own, a bad label on it can carry the whole email — and the reply language follows the whole-email answer.',
+    tx_known_cpu_latency_t: 'On CPU this is seconds, not milliseconds',
+    tx_known_cpu_latency_d: 'A full-length email takes over half a minute. The client timeout is 120 seconds and the wait is deliberate: cutting a translation short would hand the analysis chain a half-read email, which is worse than a slow reply.',
+    tx_known_try: 'run it',
+
+    tx_langs_title: 'The languages we serve',
+    tx_langs_sub: (model, served) => `the model handles ${model}; we expose ${served}`,
+    tx_base_tag: 'baseline',
+    tx_langs_note: 'The gap is ours, not the model\'s. Being able to produce a language is not the same as being able to stand behind the reply we send in it, so the list stops at the nine the service declares and we can review.',
+    tx_other_d: 'The tenth value, other, does not mean "we could not tell" — it means "not one of these nine". That mail is still translated and still analysed; only the reply falls back to English.',
+
+    tx_reply_title: 'What language the customer gets back',
+    tx_reply_sub: 'the one output of this layer a customer ever sees',
+    tx_reply_native_t: 'Their own language, written natively',
+    tx_reply_native_d: 'The reply model is told to write in the detected language directly, idiomatically, with the right register named for each one — usted, Sie, vous, 敬語, 존댓말. It is not the English reply run back through a translator, because that reads like a machine translation.',
+    tx_reply_fallback_t: 'English when we are not sure',
+    tx_reply_fallback_d: 'Anything that lands on other is answered in English rather than in a guess.',
+    tx_reply_never_t: 'The English baseline is never sent',
+    tx_reply_never_d: 'It exists for the models downstream. It is stored on the thread only so the tags can be checked against what the analyser actually read.',
+
+    tx_down_title: 'Who reads the English baseline',
+    tx_down_sub: 'three consumers, all English-only — this layer exists for them, not for people',
+    tx_down_emotion_t: 'The emotion model',
+    tx_down_emotion_d: 'English-only. On a Spanish email it returns AMBIGUOUS with all nine clusters at zero, so sentiment falls back to the language model\'s self-assessment.',
+    tx_down_keywords_t: 'The manual-review keyword rules',
+    tx_down_keywords_d: 'Literal English strings — lawyer, chargeback, injured, hacked. An email reading "voy a llamar a mi abogado" matches none of them, so the escalation never fires.',
+    tx_down_template_t: 'The tagging template',
+    tx_down_template_d: 'The step-1 prompt is written in English and classifies most reliably on English input.',
+    tx_down_note: 'Take this layer away and all three degrade at once, quietly, on exactly the mail that is hardest to handle well.',
+
+    tx_try_title: 'Run a text through it',
+    tx_try_sub: 'the raw service call, with no English gate — so you can watch English in / English out for yourself',
+    tx_run: 'Translate',
+    tx_running: 'Translating…',
+    tx_ph: 'Paste an email in any language.',
+    tx_chars: (n, max) => `${n} / ${max}`,
+    tx_bench_cost: 'Expect ten to thirty seconds. The model runs on CPU and decodes one token at a time — the page is not stuck.',
+    tx_sample_expect: (lang) => `actually ${lang}`,
+
+    tx_result_title: 'Result',
+    tx_tested_by: (who, when) => `run by ${who} · ${when}`,
+    tx_result_fail: 'The service gave no result.',
+    tx_claim_service: 'service says',
+    tx_claim_local: 'local check says',
+    tx_claim_final: 'tagged as',
+    tx_claim_gate: 'in production',
+    tx_claim_none: 'nothing',
+    tx_claim_unserved: 'not one of the nine we serve',
+    tx_claim_script: (s) => `from the script · ${s}`,
+    tx_claim_words: 'from function words',
+    tx_claim_by_service: 'the service won',
+    tx_claim_by_local: 'the local check won',
+    tx_gate_skip: 'no call',
+    tx_gate_call: 'calls the service',
+    tx_gate_note: 'what step 1 would decide',
+    tx_latency: 'Wall time',
+    tx_chars_lbl: 'Characters',
+    tx_speed: 'Throughput',
+    tx_speed_v: (n) => `${n} chars/s`,
+    tx_paragraphs: 'Paragraphs',
+    tx_out_title: 'English baseline',
+    tx_seg_title: 'Piece by piece',
+    tx_seg_sub: 'every piece was labelled the same language as the email',
+    tx_seg_odd: (n) => `${n} of these pieces were labelled a different language than the email as a whole. That disagreement is what can decide the reply language.`,
+    tx_seg_none: (n) => `${n} of these pieces came back with no language label at all — fasttext identified nothing for them, which is what happens when the language is outside the served list.`,
+    tx_seg_row: (p, i) => `paragraph ${p} · piece ${i}`,
+    tx_seg_used: (l) => `translated as ${l}`,
+
+    tx_fb_title: 'Was this right?',
+    tx_fb_sub: 'two separate questions — the translation can be perfect while the language is wrong. Anyone can judge anyone\'s test.',
+    tx_fb_quality: 'The translation itself',
+    tx_fb_good: 'Good',
+    tx_fb_bad: 'Bad',
+    tx_fb_lang: 'The language it actually is — pre-set to what the pipeline decided, so agreeing is one click',
+    tx_fb_lang_saved: (l) => `language: ${l}`,
+    tx_fb_suggested: 'Your suggested translation',
+    tx_fb_suggested_ph: 'Paste the translation you think is correct.',
+    tx_fb_suggested_hint: 'Optional, but useful when the model got the wording wrong and you want to show the fix.',
+    tx_fb_note_ph: 'What did it get wrong? (optional)',
+    tx_fb_save: 'Save',
+    tx_fb_saving: 'Saving…',
+    tx_fb_saved: 'Saved.',
+    tx_fb_by: (who, when) => `by ${who} · ${when}`,
+    tx_verdict_good: 'Good',
+    tx_verdict_bad: 'Bad',
+    tx_suggested_title: 'Suggested translation',
+    tx_suggested_short: 'has suggested translation',
+
+    tx_kpi_tests: 'Tests',
+    tx_kpi_tests_sub: (n) => `by ${n} ${n === 1 ? 'person' : 'people'}`,
+    tx_kpi_quality: 'Translation',
+    tx_kpi_quality_sub: (n) => `judged good, of ${n} judged`,
+    tx_kpi_lang: 'Language',
+    tx_kpi_lang_sub: (n) => `matched, of ${n} judged`,
+    tx_kpi_speed: 'Average call',
+    tx_kpi_speed_sub: (n) => `about ${n} chars/s`,
+    tx_kpi_speed_none: 'per test',
+    tx_kpi_failed: 'No result',
+    tx_kpi_failed_sub: 'service down, or an empty translation',
+    tx_chart_feedback: 'Feedback split',
+    tx_chart_feedback_sub: 'good versus bad translations in the public log',
+    tx_chart_language: 'Language tags seen',
+    tx_chart_language_sub: 'what the pipeline thought the source language was',
+    tx_chart_truth: 'Human-corrected languages',
+    tx_chart_truth_sub: 'what people said the text really was',
+    tx_chart_latency: 'Call latency',
+    tx_chart_latency_sub: 'how long the translation call took, bucketed',
+    tx_latency_bin_under5: '< 5s',
+    tx_latency_bin_under15: '5-15s',
+    tx_latency_bin_under30: '15-30s',
+    tx_latency_bin_over30: '30s+',
+    tx_th_tests: 'Tests',
+    tx_table_detected: 'What the pipeline tagged',
+    tx_table_confusion: 'Tagged × what people said',
+    tx_table_confusion_sub: 'the diagonal is agreement; a cell off it is an email that would have been answered in the wrong language',
+    tx_th_detected: 'Tagged',
+    tx_records_title: 'Test log',
+    tx_records_sub: 'shared log, newest first — click a row to open it in the bench and judge it',
+    tx_records_empty: 'Nothing tested yet. Run a text above and it lands here for everyone to see.',
+    tx_no_verdict: 'no verdict yet',
+    tx_toast_test_fail: (msg) => `Could not run that test: ${msg}`,
+
     compose_title: 'Write to support',
-    compose_desc: 'Pick the order you are writing about, then write your email. English or Spanish — the reply follows your language.',
+    compose_desc: 'Pick the order you are writing about, then write your email. Nine languages are supported — every email is translated to English for the analysis, and the reply comes back in the language you wrote in.',
     step1_text: 'Choose the order this email is about',
     required: '(required)',
     step2_text: 'Write your email',
@@ -455,8 +729,7 @@ const I18N = {
     reset_sample: 'Reset to sample text',
     send_email: 'Send email',
     sending: 'Sending…',
-    chip_es: 'Detected: Spanish → reply in Spanish',
-    chip_en: 'Detected: English → reply in English',
+    chip_lang: (seen, reply) => `Detected: ${seen} → reply in ${reply}`,
     err_choose_order: 'Choose the order this email is about first.',
     err_write_email: 'Write your email before sending.',
     err_not_delivered: (msg) => `Not delivered. ${msg}`,
@@ -507,10 +780,14 @@ const I18N = {
     tag_not_delivered: '未送达',
     tag_sending: '发送中',
     back_to_list: '← 返回列表',
-    written_es: '以西班牙语写作',
-    written_en: '以英语写作',
+    written_in: (lang) => `以${lang}写作`,
     lang_es: '西班牙语',
     lang_en: '英语',
+    baseline_title: '英文基准',
+    baseline_ms: (ms) => `${(ms / 1000).toFixed(1)}s`,
+    baseline_note: (lang) => `这封信是${lang}来信。下面的标签、情绪模型和复核关键词读的都是这份机器翻译——那几个模型只在英文上可靠。回信仍然用${lang}写。`,
+    baseline_subject: '主题',
+    baseline_failed: (err) => `翻译服务没连上，下面的分析是在原文上跑的。非英文来信的情绪判断和复核关键词会退化。${err}`,
     reply_writing: 'Mira 正在撰写回复',
     reply_failed: (err) => `无法生成回复。${err}`,
     order_context_attached: '已附上订单信息',
@@ -558,6 +835,8 @@ const I18N = {
     analysis_title: '邮件分析',
     analysis_failed: (err) => `邮件分类失败，这封回复是在没有标签的情况下写的。${err}`,
     analysis_ms: (n) => `分析耗时 ${n} 毫秒`,
+    baseline_result_title: '翻译结果',
+    baseline_result_note: (lang) => `从 ${lang} 翻成英文。`,
     tag_intent: '意图',
     tag_sentiment: '情绪',
     tag_urgency: '紧急度',
@@ -882,8 +1161,265 @@ const I18N = {
     emo_verdict_correct: '判对',
     emo_verdict_wrong: '判错',
     emo_toast_test_fail: (msg) => `这次测试没能跑起来：${msg}`,
+
+    view_translation: '翻译模型',
+    tx_view_title: '翻译',
+    tx_view_desc: '本地翻译模型：它是什么、一封邮件在链路上被怎么处理、在真实文本上表现如何。',
+    tx_scope: '看谁的测试',
+    tx_tabs: '翻译模型分页',
+    tx_tab_model: '模型',
+    tx_tab_pipeline: '链路',
+    tx_tab_langs: '语种',
+    tx_tab_bench: '测试台',
+    tx_tab_log: '测试记录',
+    tx_desc_model: '每一封非英文来信在被任何人读到之前，都要先过一遍这个本地模型。',
+    tx_desc_pipeline: '一封邮件从收到到打上标签之间发生了什么——九步，其中只有一步是模型。',
+    tx_desc_langs: '这个信箱开放的九种语言、谁在读英文基准译文、以及客户会收到哪种语言的回信。',
+    tx_desc_bench: '拿任意一段文字试翻译服务，再说说它读对了没有。每一次测试和评价所有人都看得到。',
+    tx_desc_log: '所有人跑过的每一次翻译，以及它们加起来说明了什么。',
+    tx_off: '没有配置 TRANSLATION_API_URL，测试台连不上服务。在配好之前，来信按原文语种直接分析——情绪判断和人工复核关键词在非英文输入上都会退化。',
+
+    tx_probe_live: '服务在线',
+    tx_probe_down_short: '服务不可用',
+    tx_hero_eyebrow: '本地模型 · 链路第 0 步',
+    tx_stat_size: '参数量',
+    tx_stat_size_sub: 'dense，跑在我们自己的机器上',
+    tx_stat_langs: '语种',
+    tx_stat_langs_sub: '这里开放 / 模型支持',
+    tx_stat_ctx: '上下文',
+    tx_stat_ctx_sub: '单次生成的 token 数',
+    tx_stat_call: '一次调用',
+    tx_stat_call_sub: (device) => `${device} 上的实测区间`,
+    tx_deploy_title: '此刻真正加载的是什么',
+    tx_deploy_sub: '刚刚问过端点本人——这件事模型卡回答不了',
+    tx_deploy_model: '模型路径',
+    tx_deploy_device: '设备',
+    tx_deploy_lid: '语种识别',
+    tx_deploy_langs: '开放语种',
+    tx_deploy_endpoint: '端点',
+    tx_deploy_drift: (codes) => `服务和我们自己的词表在这几种上对不上：${codes}。说明有一边改了而另一边没跟——在对齐之前，要么有语种被打上标签却回不了信，要么有服务本来支持的语种被我们挡掉了。`,
+    tx_vendor_title: '厂商公布的结论',
+    tx_vendor_sub: '他们自己的评测、他们自己的基准——没有一条是在这里测的',
+    tx_cost_title: '在这台机器上的实际代价',
+    tx_who_client_d: '我们自己的代码',
+    tx_who_service_d: '模型外面那层服务',
+    tx_who_model_d: '权重本身',
+    tx_group_normal: '日常来信',
+    tx_group_normal_d: '开放的每种语言各一条',
+    tx_group_edge: '故意会翻车的三条',
+    tx_group_edge_d: '各对应链路页上的一条已知行为',
+    tx_recent_title: '最近跑过的',
+    tx_recent_sub: '所有人最近试过的几段——点一条打开它',
+    tx_recent_empty: '还没有人跑过。点上面一条用例，或者贴一段自己的文字。',
+    tx_flag_k: '有分歧',
+    tx_flag_k_ok: '一致',
+    tx_flag_agree: (lang) => `服务端和本地判别都读成了${lang}，回信就会用这个语种发出去。`,
+    tx_flag_overridden: (service, final) => `服务端说是${service}，本地脚本判别把它改判成了${final}。这就是那条已知的失效模式——译文可以完全正确，但语种字段本来是错的。`,
+    tx_flag_split: (service, local) => `服务端说${service}，本地判别说${local}。按规则听服务端的，所以回信会用${service}发出去——如果这是错的，问题就出在这里。`,
+    tx_probe_down: (err) => `服务没有响应 · ${err}`,
+    tx_probe_ready: '就绪',
+    tx_probe_notready: '未加载',
+
+    tx_model_title: '这个模型',
+    tx_model_sub: '一个本地翻译模型，不是写回信的那个大模型',
+    tx_model_lede: '每一封不是英文的来信，在被任何环节读到之前都会先翻成英文。这不是为了给人看译文——客户永远收不到这份文本——而是因为情绪模型、人工复核的关键词表、打标签的提示词模板全都只在英文上可靠。有了这一层，一条按英文设计的分析链才撑得起一个九语种信箱。',
+    tx_spec_arch: '架构',
+    tx_spec_arch_v: '一个通用语言模型，靠提示词下达翻译任务，不是专用翻译网络',
+    tx_spec_context: '上下文',
+    tx_spec_context_v: (n) => `单次生成 ${n} token`,
+    tx_spec_decoding: '推荐解码参数',
+    tx_spec_serving: '部署',
+    tx_spec_serving_on: (t) => `HTTP 可达 · 超时 ${t} 秒`,
+    tx_spec_serving_off: '没有配置端点',
+    tx_model_why: '因为它是通用语言模型而不是 encoder-decoder 翻译网络，所以它听得懂指令——术语表、语气、保持结构。代价是官方推荐的解码参数里 temperature 是 0.7：同一封邮件翻两次，措辞可能不一样。标签读的是译文，所以这个不确定性是真实存在的——这是整条链路上唯一一处"同样的输入不保证同样的输出"。',
+    tx_link_paper: '技术报告',
+    tx_link_repo: '代码仓库',
+
+    tx_family_title: '同系列',
+    tx_family_sub: '官方一共放出三个尺寸，1.8B 是能塞进一台 CPU 机器的那个',
+    tx_th_variant: '型号',
+    tx_th_kind: '类型',
+    tx_th_size: '参数量',
+    tx_family_ours: '在用',
+
+    tx_claim_beats_commercial: '整体上优于微软、豆包等主流商用翻译 API。',
+    tx_claim_beats_open: '在 fast-thinking 模式下优于 DeepSeek-V4-Pro、Kimi K2.6 等开源模型。',
+    tx_claim_quantized: '配合 1.25-bit 极致量化，只需 440 MB 存储，推理提速约 1.5 倍。',
+    tx_measured_sub: (date, device) => `${date} 直接调我们自己的端点 · ${device}，无并发`,
+    tx_th_case: '文本',
+    tx_th_chars: '字数',
+    tx_th_segments: '分片',
+    tx_th_ms: '耗时',
+    tx_measured_note: '耗时跟着**生成的 token 数**走，不跟输入长度走：11 个字的主题行照样要三秒半，因为它仍然是一次完整前向加逐 token 解码。这也正是生产链路在来信本来就是英文时直接跳过这次调用的原因。',
+
+    tx_chain_title: '一封邮件，九步',
+    tx_chain_sub: '其中只有一步是模型；剩下八步里有四步是我们自己的代码',
+    tx_who_client: '我们',
+    tx_who_service: '服务',
+    tx_who_model: '模型',
+    tx_step_gate_t: '这封信本来就是英文吗？',
+    tx_step_gate_d: '一次本地判别决定要不要调服务。确认是英文就直接跳过——英文进去出来的不是原句而是改写，而这次改写要花掉一整次调用。',
+    tx_step_pack_t: '主题当作第一段拼进去',
+    tx_step_pack_d: '主题用一个空行接在正文前面，一次调用同时翻好两样。段落数进出一致，所以主题会作为第 0 段回来。',
+    tx_step_paragraphs_t: '按空行切段',
+    tx_step_paragraphs_d: '服务端把文本切成段落并保留下标——上一步那个"主题当第 0 段"的做法能成立，全靠这一点。',
+    tx_step_segments_t: '把长段落再切开',
+    tx_step_segments_d: (n) => `超过 ${n} 个字的段落会被切成若干片，每一片单独翻译。`,
+    tx_step_lid_t: '逐片判语种',
+    tx_step_lid_d: 'fasttext lid.176 对每一片单独打语种标签。同一封信的不同片可以判得不一样，而整封的结论不是投票出来的——一个两词的主题行就可能决定它。',
+    tx_step_generate_t: '逐片翻译',
+    tx_step_generate_d: '整条链路上唯一一次模型调用。它上下的所有步骤都是确定性代码。',
+    tx_step_rejoin_t: '按段落下标拼回来',
+    tx_step_rejoin_d: '片拼回段落，段落拼回整篇，所以出来的东西和进去的形状一样。',
+    tx_step_unpack_t: '把主题取回来',
+    tx_step_unpack_d: '第 0 段是译好的主题，其余是正文。段落数对不上时主题保留原文——宁可主题不译，也不要把正文的第一段错当成主题。',
+    tx_step_arbitrate_t: '定下原文语种',
+    tx_step_arbitrate_d: '服务端的判定优先，只有一个例外：它说英文、但文本明摆着不是拉丁字母时，听本地判别的。这个组合是一条已知的失效模式，不是势均力敌的分歧。',
+    tx_chain_note: '这一整条链路永不抛异常。服务挂了就把原文原样往下游送、附上本地判别的语种，失败原因记在那封信的记录里。客户照样收得到回信——只是背后的分析弱一些。',
+
+    tx_contract_title: '返回什么',
+    tx_contract_sub: '字段名照抄不译——这是你在服务端日志里会 grep 的那些键',
+    tx_th_field: '字段',
+    tx_th_meaning: '含义',
+    tx_field_ok: 'false 表示服务拒绝了这次请求，原因在旁边。',
+    tx_field_detected_primary_language: '整封信被判成的语种。信它之前先看逐片的标签。',
+    tx_field_translated_text: '整篇译文，段落之间用空行连接。',
+    tx_field_paragraphs: '逐段译文，带下标。主题就是从这里取回来的。',
+    tx_field_segments: '逐片明细：原文、译文、这一片判出来的语种、以及实际按哪个语种翻的。',
+    tx_field_input_char_count: '服务收到了多少个字符。',
+    tx_field_input_source_lang: '我们强制指定的源语种。一般是 null——交给它自己判。',
+    tx_field_input_target_lang: '这里恒为 en。英文是下游所有环节读的那个基准。',
+
+    tx_known_title: '契约里没写、但它确实会做的四件事',
+    tx_known_sub: '每一条都是对着我们自己的端点测出来的，各配了一条能复现的用例',
+    tx_known_english_rewrite_t: '英文进、英文出不是恒等变换',
+    tx_known_english_rewrite_d: '喂英文进去，回来的是改写过的英文，不是你发过去的那句话。改写本身无害，但它改的是客户的原话，而且要花掉一整次调用。第 1 步那道闸门就是为这件事存在的。',
+    tx_known_unsupported_as_en_t: '开放列表之外的语种会被报成英语',
+    tx_known_unsupported_as_en_d: '一封俄语来信译文完全正确——模型的覆盖范围远不止我们开放的这九种——但语种字段给的是 en，逐片的语种标签则是空的。照字面采信的话，一位俄语客户会被登记成英语客户，然后被"专门用英语"回信，而不是作为兜底回英语。',
+    tx_known_short_segment_lid_t: '短片的语种标签不可靠',
+    tx_known_short_segment_lid_d: '靠两三个词判语种基本是抛硬币。而主题行自成一段，它上面一个错标签就可能带偏整封信——回信语种跟的正是整封那个结论。',
+    tx_known_cpu_latency_t: '跑在 CPU 上，单位是秒不是毫秒',
+    tx_known_cpu_latency_d: '一封完整长度的邮件要半分钟以上。客户端超时给到 120 秒，这个等待是故意的：中途截断等于把一封读了一半的信交给分析链，那比回信慢更糟。',
+    tx_known_try: '跑一下',
+
+    tx_langs_title: '我们开放的语种',
+    tx_langs_sub: (model, served) => `模型支持 ${model} 种，我们开放 ${served} 种`,
+    tx_base_tag: '基准',
+    tx_langs_note: '这个差额是我们的限制，不是模型的。写得出一种语言，和能为这种语言的回信质量负责，是两回事——所以名单停在服务声明支持、我们也复核得了的这九种。',
+    tx_other_d: '第十个取值 other 不是"没判出来"，它的含义是"不在这九种里"。这类来信照样翻译、照样分析，只有回信退回英语。',
+
+    tx_reply_title: '客户会收到哪种语言的回信',
+    tx_reply_sub: '这一层唯一会被客户看到的产出',
+    tx_reply_native_t: '用他自己的语言，按母语写',
+    tx_reply_native_d: '提示词直接指定用判定出来的语种写，要求地道、敬语形式逐一点名——西语 usted、德语 Sie、法语 vous、日语敬語、韩语 존댓말。不是把英文回信再机翻回去，机翻回去的信读起来就是机翻。',
+    tx_reply_fallback_t: '拿不准就用英语',
+    tx_reply_fallback_d: '落到 other 的一律回英语，而不是猜一个语种。',
+    tx_reply_never_t: '英文基准译文永远不会被发出去',
+    tx_reply_never_d: '它是给下游那几个模型看的。存在那封信的记录里，只是为了让人能核对"分析环节到底读到了什么"。',
+
+    tx_down_title: '谁在读英文基准译文',
+    tx_down_sub: '三个消费者，全都只懂英文——这一层是为它们存在的，不是为人',
+    tx_down_emotion_t: '情绪模型',
+    tx_down_emotion_d: '只覆盖英文。遇到西班牙语来信直接返回 AMBIGUOUS，九个簇全是 0，情绪只能退回大模型的自评。',
+    tx_down_keywords_t: '人工复核的关键词规则',
+    tx_down_keywords_d: '全是英文字面量——lawyer、chargeback、injured、hacked。一封写着 "voy a llamar a mi abogado" 的信一条都命中不了，该升级的没升级。',
+    tx_down_template_t: '打标签的提示词模板',
+    tx_down_template_d: '第一步的模板本身是英文的，在英文输入上分类质量最稳。',
+    tx_down_note: '撤掉这一层，这三样会同时退化，而且是悄悄退化——退化的恰好是最难处理好的那批来信。',
+
+    tx_try_title: '拿一段文字试试',
+    tx_try_sub: '直接调服务，不走跳过英文那道闸门——所以"英文进、英文出"你可以自己看一遍',
+    tx_run: '翻译',
+    tx_running: '翻译中…',
+    tx_ph: '贴一封任意语种的邮件。',
+    tx_chars: (n, max) => `${n} / ${max}`,
+    tx_bench_cost: '预计十到三十秒。模型跑在 CPU 上、逐 token 解码——页面没有卡死。',
+    tx_sample_expect: (lang) => `实际是${lang}`,
+
+    tx_result_title: '结果',
+    tx_tested_by: (who, when) => `${who} 跑的 · ${when}`,
+    tx_result_fail: '服务没有给出结果。',
+    tx_claim_service: '服务端判定',
+    tx_claim_local: '本地判别',
+    tx_claim_final: '最终采用',
+    tx_claim_gate: '生产链路',
+    tx_claim_none: '没给',
+    tx_claim_unserved: '不在我们开放的九种里',
+    tx_claim_script: (s) => `按文字体系 · ${s}`,
+    tx_claim_words: '按功能词计数',
+    tx_claim_by_service: '听服务端的',
+    tx_claim_by_local: '听本地的',
+    tx_gate_skip: '不会调服务',
+    tx_gate_call: '会调服务',
+    tx_gate_note: '第 1 步会怎么判',
+    tx_latency: '耗时',
+    tx_chars_lbl: '字数',
+    tx_speed: '吞吐',
+    tx_speed_v: (n) => `${n} 字/秒`,
+    tx_paragraphs: '段落数',
+    tx_out_title: '英文基准译文',
+    tx_seg_title: '逐片明细',
+    tx_seg_sub: '每一片的语种标签都和整封一致',
+    tx_seg_odd: (n) => `有 ${n} 片的语种标签和整封的结论不一样。回信语种可能就是被这个分歧决定的。`,
+    tx_seg_none: (n) => `有 ${n} 片压根没给语种标签——fasttext 什么都没判出来，语种超出服务开放范围时就是这样。`,
+    tx_seg_row: (p, i) => `第 ${p} 段 · 第 ${i} 片`,
+    tx_seg_used: (l) => `按 ${l} 翻的`,
+
+    tx_fb_title: '这次对不对？',
+    tx_fb_sub: '两个独立的问题——译文可以完全正确而语种判错。谁都可以评价谁的测试。',
+    tx_fb_quality: '译文本身',
+    tx_fb_good: '好',
+    tx_fb_bad: '不行',
+    tx_fb_lang: '这段文字实际是什么语种——已经预选成链路的判定，同意的话点一下保存就行',
+    tx_fb_lang_saved: (l) => `语种：${l}`,
+    tx_fb_suggested: '你认为正确的译文',
+    tx_fb_suggested_ph: '把你觉得更对的译文贴在这里。',
+    tx_fb_suggested_hint: '可选，但当模型译错措辞时很有用。',
+    tx_fb_note_ph: '哪里不对？（可不填）',
+    tx_fb_save: '保存',
+    tx_fb_saving: '保存中…',
+    tx_fb_saved: '已保存。',
+    tx_fb_by: (who, when) => `${who} · ${when}`,
+    tx_verdict_good: '译文好',
+    tx_verdict_bad: '译文差',
+    tx_suggested_title: '建议译文',
+    tx_suggested_short: '有建议译文',
+
+    tx_kpi_tests: '测试次数',
+    tx_kpi_tests_sub: (n) => `来自 ${n} 个人`,
+    tx_kpi_quality: '译文',
+    tx_kpi_quality_sub: (n) => `判为好，共 ${n} 条评过`,
+    tx_kpi_lang: '语种',
+    tx_kpi_lang_sub: (n) => `判对，共 ${n} 条评过`,
+    tx_kpi_speed: '平均一次',
+    tx_kpi_speed_sub: (n) => `约 ${n} 字/秒`,
+    tx_kpi_speed_none: '每次测试',
+    tx_kpi_failed: '没有结果',
+    tx_kpi_failed_sub: '服务不可用，或译文为空',
+    tx_chart_feedback: '反馈分布',
+    tx_chart_feedback_sub: '公开记录里的好评与差评',
+    tx_chart_language: '链路判到的语种',
+    tx_chart_language_sub: '服务端认为原文是什么语种',
+    tx_chart_truth: '人工修正后的语种',
+    tx_chart_truth_sub: '人最后认为这段文字到底是什么语种',
+    tx_chart_latency: '调用耗时',
+    tx_chart_latency_sub: '翻译调用耗时分桶',
+    tx_latency_bin_under5: '5 秒内',
+    tx_latency_bin_under15: '5-15 秒',
+    tx_latency_bin_under30: '15-30 秒',
+    tx_latency_bin_over30: '30 秒以上',
+    tx_th_tests: '测试数',
+    tx_table_detected: '链路判成了什么',
+    tx_table_confusion: '链路判定 × 人认为的真实语种',
+    tx_table_confusion_sub: '对角线是一致；偏离对角线的每一格，都是一封会被用错语言回复的邮件',
+    tx_th_detected: '链路判定',
+    tx_records_title: '测试记录',
+    tx_records_sub: '共享记录，最新在前——点一行就在测试台里打开它并评价',
+    tx_records_empty: '还没有人测过。在上面跑一段，它就会出现在这里给所有人看。',
+    tx_no_verdict: '还没人评价',
+    tx_toast_test_fail: (msg) => `这次测试没能跑起来：${msg}`,
     compose_title: '写信给客服',
-    compose_desc: '选择你要咨询的订单，然后写下你的邮件。英语或西班牙语——回复会跟随你的语言。',
+    compose_desc: '选择你要咨询的订单，然后写下你的邮件。支持 9 种语言——每封信都会先统一翻译成英文做分析，回信仍然用你写信的语言。',
     step1_text: '选择这封邮件涉及的订单',
     required: '（必填）',
     step2_text: '写下你的邮件',
@@ -894,8 +1430,7 @@ const I18N = {
     reset_sample: '重置为示例文本',
     send_email: '发送邮件',
     sending: '发送中…',
-    chip_es: '检测到：西班牙语 → 用西班牙语回复',
-    chip_en: '检测到：英语 → 用英语回复',
+    chip_lang: (seen, reply) => `检测到：${seen} → 用${reply}回复`,
     err_choose_order: '请先选择这封邮件涉及的订单。',
     err_write_email: '发送前请先写下你的邮件。',
     err_not_delivered: (msg) => `未送达。${msg}`,
@@ -946,10 +1481,14 @@ const I18N = {
     tag_not_delivered: 'no entregado',
     tag_sending: 'enviando',
     back_to_list: '← Volver a la lista',
-    written_es: 'escrito en español',
-    written_en: 'escrito en inglés',
+    written_in: (lang) => `escrito en ${lang}`,
     lang_es: 'Español',
     lang_en: 'Inglés',
+    baseline_title: 'Base en inglés',
+    baseline_ms: (ms) => `${(ms / 1000).toFixed(1)}s`,
+    baseline_note: (lang) => `El correo llegó en ${lang}. Todo lo que viene después — las etiquetas, el modelo de emoción y las palabras clave de revisión — lee esta traducción automática, porque esos modelos solo funcionan en inglés. La respuesta se escribe igualmente en ${lang}.`,
+    baseline_subject: 'Asunto',
+    baseline_failed: (err) => `No se pudo contactar con el servicio de traducción, así que el análisis se hizo sobre el texto original. El sentimiento y las palabras clave de revisión se degradan con correo que no está en inglés. ${err}`,
     reply_writing: 'Mira está escribiendo una respuesta',
     reply_failed: (err) => `No se pudo generar la respuesta. ${err}`,
     order_context_attached: 'Datos del pedido adjuntos',
@@ -997,6 +1536,8 @@ const I18N = {
     analysis_title: 'Análisis del mensaje',
     analysis_failed: (err) => `No se pudo clasificar el mensaje, así que la respuesta se escribió sin etiquetas. ${err}`,
     analysis_ms: (n) => `analizado en ${n} ms`,
+    baseline_result_title: 'Resultado de la traducción',
+    baseline_result_note: (lang) => `Traducido al inglés desde ${lang}.`,
     tag_intent: 'Intención',
     tag_sentiment: 'Sentimiento',
     tag_urgency: 'Urgencia',
@@ -1321,8 +1862,265 @@ const I18N = {
     emo_verdict_correct: 'Correcto',
     emo_verdict_wrong: 'Incorrecto',
     emo_toast_test_fail: (msg) => `No se pudo ejecutar la prueba: ${msg}`,
+
+    view_translation: 'Traducción',
+    tx_view_title: 'Traducción',
+    tx_view_desc: 'El modelo de traducción local: qué es, qué le hace el pipeline a un correo y cómo se comporta con texto real.',
+    tx_scope: 'Qué pruebas mostrar',
+    tx_tabs: 'Páginas de traducción',
+    tx_tab_model: 'El modelo',
+    tx_tab_pipeline: 'Pipeline',
+    tx_tab_langs: 'Idiomas',
+    tx_tab_bench: 'Banco',
+    tx_tab_log: 'Registro',
+    tx_desc_model: 'El modelo local por el que pasa todo correo que no venga ya en inglés, antes de que nada más lo lea.',
+    tx_desc_pipeline: 'Qué le ocurre a un correo entre que llega y queda etiquetado: nueve pasos, y solo uno es el modelo.',
+    tx_desc_langs: 'Los nueve idiomas que atiende este buzón, quién lee la base en inglés y en qué idioma se responde al cliente.',
+    tx_desc_bench: 'Pasa cualquier texto por el servicio de traducción y di si lo leyó bien. Cada prueba y cada juicio son visibles para todos.',
+    tx_desc_log: 'Todas las traducciones que alguien ha probado, y qué suman entre todas.',
+    tx_off: 'No hay TRANSLATION_API_URL configurada, así que el banco no puede llegar al servicio. Hasta que se configure, el correo se analiza en el idioma en que llegó: el sentimiento y las palabras clave de revisión se degradan con todo lo que no sea inglés.',
+
+    tx_probe_live: 'el servicio responde',
+    tx_probe_down_short: 'servicio caído',
+    tx_hero_eyebrow: 'modelo local · paso 0 de la cadena',
+    tx_stat_size: 'Tamaño',
+    tx_stat_size_sub: 'dense, corre en nuestra propia máquina',
+    tx_stat_langs: 'Idiomas',
+    tx_stat_langs_sub: 'servidos aquí / en el modelo',
+    tx_stat_ctx: 'Contexto',
+    tx_stat_ctx_sub: 'tokens por generación',
+    tx_stat_call: 'Una llamada',
+    tx_stat_call_sub: (device) => `rango medido en ${device}`,
+    tx_deploy_title: 'Qué hay cargado de verdad',
+    tx_deploy_sub: 'preguntado al endpoint ahora mismo: esto una ficha de modelo no lo puede decir',
+    tx_deploy_model: 'Ruta del modelo',
+    tx_deploy_device: 'Dispositivo',
+    tx_deploy_lid: 'Id de idioma',
+    tx_deploy_langs: 'Idiomas servidos',
+    tx_deploy_endpoint: 'Endpoint',
+    tx_deploy_drift: (codes) => `El servicio y nuestro propio vocabulario no coinciden en estos: ${codes}. Un lado cambió sin el otro; hasta que coincidan, o se está etiquetando un idioma en el que no podemos responder, o se rechaza uno que el servicio sí maneja.`,
+    tx_vendor_title: 'Lo que publicó el fabricante',
+    tx_vendor_sub: 'su evaluación, en sus benchmarks: nada de esto está medido aquí',
+    tx_cost_title: 'Lo que cuesta en esta máquina',
+    tx_who_client_d: 'código nuestro',
+    tx_who_service_d: 'la capa que envuelve al modelo',
+    tx_who_model_d: 'los pesos en sí',
+    tx_group_normal: 'Correo corriente',
+    tx_group_normal_d: 'uno por cada idioma que servimos',
+    tx_group_edge: 'Los fallos conocidos',
+    tx_group_edge_d: 'cada uno reproduce una de las conductas de la página de pipeline',
+    tx_recent_title: 'Ejecutado hace poco',
+    tx_recent_sub: 'las últimas pruebas que pasó alguien: pulsa una para abrirla',
+    tx_recent_empty: 'Todavía no se ha ejecutado nada. Elige un ejemplo de arriba o pega tu propio texto.',
+    tx_flag_k: 'discrepancia',
+    tx_flag_k_ok: 'de acuerdo',
+    tx_flag_agree: (lang) => `El servicio y la comprobación local leyeron esto como ${lang}, así que la respuesta saldría en ese idioma.`,
+    tx_flag_overridden: (service, final) => `El servicio dijo ${service}; la comprobación local del alfabeto lo corrigió a ${final}. Este es el fallo conocido: la traducción puede ser perfecta y aun así el campo de idioma habría estado mal.`,
+    tx_flag_split: (service, local) => `El servicio dijo ${service} y la comprobación local dijo ${local}. Por regla gana el servicio, así que la respuesta saldría en ${service}; si eso está mal, aquí es donde se torció.`,
+    tx_probe_down: (err) => `el servicio no responde · ${err}`,
+    tx_probe_ready: 'listo',
+    tx_probe_notready: 'sin cargar',
+
+    tx_model_title: 'El modelo',
+    tx_model_sub: 'un modelo de traducción local, no el modelo de lenguaje que escribe las respuestas',
+    tx_model_lede: 'Todo correo que no sea ya inglés se traduce antes de que nada más lo mire. No para el cliente —nunca ve este texto— sino porque el modelo de emociones, las reglas de palabras clave para revisión manual y la plantilla de etiquetado funcionan solo en inglés. Esta capa es lo que permite que una cadena de análisis diseñada en inglés atienda un buzón de nueve idiomas.',
+    tx_spec_arch: 'Arquitectura',
+    tx_spec_arch_v: 'un modelo de lenguaje general al que se le pide traducir, no una red de traducción dedicada',
+    tx_spec_context: 'Contexto',
+    tx_spec_context_v: (n) => `${n} tokens por generación`,
+    tx_spec_decoding: 'Decodificación sugerida',
+    tx_spec_serving: 'Despliegue',
+    tx_spec_serving_on: (t) => `accesible por HTTP · ${t}s de espera`,
+    tx_spec_serving_off: 'sin endpoint configurado',
+    tx_model_why: 'Al ser un modelo de lenguaje general y no un traductor encoder-decoder, acepta instrucciones: terminología, tono, mantener la estructura. También implica que la decodificación que sugiere el propio fabricante usa temperature 0.7: el mismo correo traducido dos veces puede volver con otras palabras. Las etiquetas leen la traducción, así que esa variación es real. Es el único punto de la cadena donde la misma entrada no tiene por qué dar la misma salida.',
+    tx_link_paper: 'informe técnico',
+    tx_link_repo: 'repositorio',
+
+    tx_family_title: 'La familia',
+    tx_family_sub: 'se publicaron tres tamaños; el de 1.8B es el que cabe en una máquina con CPU',
+    tx_th_variant: 'Variante',
+    tx_th_kind: 'Tipo',
+    tx_th_size: 'Parámetros',
+    tx_family_ours: 'el nuestro',
+
+    tx_claim_beats_commercial: 'En conjunto, supera a las API comerciales de traducción más usadas, como las de Microsoft y Doubao.',
+    tx_claim_beats_open: 'En modo fast-thinking, supera a modelos abiertos como DeepSeek-V4-Pro y Kimi K2.6.',
+    tx_claim_quantized: 'Con cuantización de 1.25 bits ocupa 440 MB y corre alrededor de 1.5× más rápido.',
+    tx_measured_sub: (date, device) => `llamadas directas a nuestro endpoint el ${date} · ${device}, sin concurrencia`,
+    tx_th_case: 'Texto',
+    tx_th_chars: 'Caracteres',
+    tx_th_segments: 'Trozos',
+    tx_th_ms: 'Tiempo real',
+    tx_measured_note: 'La latencia sigue al número de tokens generados, no al largo de la entrada: un asunto de once caracteres cuesta igualmente tres segundos y medio, porque sigue siendo una pasada completa decodificada token a token. Por eso producción se salta la llamada del todo cuando el correo ya viene en inglés.',
+
+    tx_chain_title: 'Un correo, nueve pasos',
+    tx_chain_sub: 'exactamente uno es el modelo; cuatro de los otros ocho son código nuestro',
+    tx_who_client: 'nuestro',
+    tx_who_service: 'servicio',
+    tx_who_model: 'modelo',
+    tx_step_gate_t: '¿Esto ya viene en inglés?',
+    tx_step_gate_d: 'Una comprobación local decide si llamar al servicio siquiera. Si el inglés es claro, se salta: el modelo reescribe la entrada en inglés en vez de devolverla igual, y esa reescritura costaría una llamada entera.',
+    tx_step_pack_t: 'El asunto entra como primer párrafo',
+    tx_step_pack_d: 'El asunto se antepone al cuerpo con una línea en blanco, así una sola llamada traduce ambos. El número de párrafos sobrevive el viaje, de modo que el asunto vuelve como párrafo 0.',
+    tx_step_paragraphs_t: 'Cortar por líneas en blanco',
+    tx_step_paragraphs_d: 'El servicio parte el texto en párrafos y conserva sus índices, que es lo único que hace viable el truco del asunto.',
+    tx_step_segments_t: 'Partir los párrafos largos',
+    tx_step_segments_d: (n) => `Los párrafos de más de ${n} caracteres se cortan en trozos, y cada trozo se traduce por separado.`,
+    tx_step_lid_t: 'Identificar el idioma, trozo a trozo',
+    tx_step_lid_d: 'fasttext lid.176 etiqueta cada trozo por separado. Los trozos de un mismo correo pueden discrepar, y la respuesta para el correo entero no es una votación: un asunto de dos palabras puede decidirla.',
+    tx_step_generate_t: 'Traducir cada trozo',
+    tx_step_generate_d: 'La única llamada al modelo de toda la cadena. Todo lo que hay encima y debajo es código determinista.',
+    tx_step_rejoin_t: 'Rearmar por índice de párrafo',
+    tx_step_rejoin_d: 'Los trozos vuelven a ser párrafos y los párrafos un solo texto, así que lo que sale tiene la misma forma que lo que entró.',
+    tx_step_unpack_t: 'Volver a sacar el asunto',
+    tx_step_unpack_d: 'El párrafo 0 es el asunto traducido y el resto es el cuerpo. Si las cuentas no cuadran, el asunto conserva su texto original: mejor un asunto sin traducir que la primera línea del cuerpo archivada como asunto.',
+    tx_step_arbitrate_t: 'Decidir el idioma',
+    tx_step_arbitrate_d: 'Gana la respuesta del servicio, con una excepción: cuando dice inglés pero el texto está claramente en un alfabeto no latino, gana la comprobación local. Esa combinación es un fallo conocido, no una diferencia ajustada.',
+    tx_chain_note: 'Nada de esto lanza excepciones. Si el servicio se cae, el texto original sigue hacia abajo tal cual con la conjetura local del idioma, y el motivo queda registrado en el hilo. El cliente igual recibe respuesta; solo es más débil el análisis detrás.',
+
+    tx_contract_title: 'Qué devuelve',
+    tx_contract_sub: 'nombres de campo literales: son las claves que buscarías en el log del servicio',
+    tx_th_field: 'Campo',
+    tx_th_meaning: 'Qué es',
+    tx_field_ok: 'false significa que el servicio rechazó la petición; el motivo va al lado.',
+    tx_field_detected_primary_language: 'El idioma que se le atribuyó al correo entero. Mira las etiquetas por trozo antes de fiarte.',
+    tx_field_translated_text: 'La traducción completa, con los párrafos unidos por líneas en blanco.',
+    tx_field_paragraphs: 'Una traducción por párrafo, indexada. De aquí se recupera el asunto.',
+    tx_field_segments: 'Por trozo: el texto de origen, su traducción, el idioma detectado y el idioma con el que realmente se tradujo.',
+    tx_field_input_char_count: 'Cuántos caracteres recibió el servicio.',
+    tx_field_input_source_lang: 'El idioma de origen que forzamos, si forzamos alguno. Normalmente null: dejamos que lo detecte.',
+    tx_field_input_target_lang: 'Aquí siempre en. El inglés es la base que lee todo lo que viene después.',
+
+    tx_known_title: 'Cuatro cosas que hace y que el contrato no menciona',
+    tx_known_sub: 'cada una medida contra nuestro propio endpoint, con el ejemplo que la reproduce',
+    tx_known_english_rewrite_t: 'Inglés que entra, inglés que sale: no es la identidad',
+    tx_known_english_rewrite_d: 'Dale inglés y devuelve inglés reescrito, no la frase que enviaste. Inocuo en sí, pero cambia las palabras del cliente y cuesta una llamada entera. Ese es todo el motivo de que exista el paso 1.',
+    tx_known_unsupported_as_en_t: 'Los idiomas fuera de la lista vuelven etiquetados como inglés',
+    tx_known_unsupported_as_en_d: 'Un correo en ruso se traduce correctamente —el modelo llega mucho más allá de los nueve que servimos— pero el campo de idioma dice en y la etiqueta por trozo viene vacía. Tomado al pie de la letra, eso archiva a un cliente ruso como angloparlante y le responde en inglés a propósito, no por defecto.',
+    tx_known_short_segment_lid_t: 'Los trozos cortos reciben etiquetas de idioma poco fiables',
+    tx_known_short_segment_lid_d: 'Identificar un idioma con dos o tres palabras es casi cara o cruz. Como el asunto es un párrafo propio, una mala etiqueta ahí puede arrastrar al correo entero, y el idioma de la respuesta sigue a esa conclusión global.',
+    tx_known_cpu_latency_t: 'En CPU esto son segundos, no milisegundos',
+    tx_known_cpu_latency_d: 'Un correo de largo normal pasa de medio minuto. La espera del cliente son 120 segundos y es deliberada: cortar una traducción a medias le entregaría a la cadena de análisis un correo leído por la mitad, y eso es peor que una respuesta lenta.',
+    tx_known_try: 'probarlo',
+
+    tx_langs_title: 'Los idiomas que servimos',
+    tx_langs_sub: (model, served) => `el modelo maneja ${model}; nosotros exponemos ${served}`,
+    tx_base_tag: 'base',
+    tx_langs_note: 'La diferencia es nuestra, no del modelo. Poder producir un idioma no es lo mismo que poder responder por la calidad de la respuesta que enviamos en él, así que la lista se detiene en los nueve que el servicio declara y que sabemos revisar.',
+    tx_other_d: 'El décimo valor, other, no significa «no supimos»: significa «no es ninguno de estos nueve». Ese correo se traduce y se analiza igual; lo único que vuelve al inglés es la respuesta.',
+
+    tx_reply_title: 'En qué idioma responde al cliente',
+    tx_reply_sub: 'lo único de esta capa que el cliente llega a ver',
+    tx_reply_native_t: 'En su idioma, escrito como nativo',
+    tx_reply_native_d: 'Al modelo que responde se le indica escribir directamente en el idioma detectado, de forma idiomática y con el registro nombrado uno por uno: usted, Sie, vous, 敬語, 존댓말. No es la respuesta en inglés pasada por un traductor, porque eso se lee como una traducción automática.',
+    tx_reply_fallback_t: 'Inglés cuando no estamos seguros',
+    tx_reply_fallback_d: 'Todo lo que cae en other se responde en inglés y no en una conjetura.',
+    tx_reply_never_t: 'La base en inglés nunca se envía',
+    tx_reply_never_d: 'Existe para los modelos que vienen después. Se guarda en el hilo solo para poder contrastar las etiquetas con lo que el analizador leyó de verdad.',
+
+    tx_down_title: 'Quién lee la base en inglés',
+    tx_down_sub: 'tres consumidores, todos solo en inglés: esta capa existe para ellos, no para las personas',
+    tx_down_emotion_t: 'El modelo de emociones',
+    tx_down_emotion_d: 'Solo inglés. Ante un correo en español devuelve AMBIGUOUS con los nueve grupos a cero, así que el sentimiento vuelve a la autoevaluación del modelo de lenguaje.',
+    tx_down_keywords_t: 'Las reglas de palabras clave para revisión manual',
+    tx_down_keywords_d: 'Cadenas literales en inglés: lawyer, chargeback, injured, hacked. Un correo que dice «voy a llamar a mi abogado» no coincide con ninguna, así que el escalado nunca salta.',
+    tx_down_template_t: 'La plantilla de etiquetado',
+    tx_down_template_d: 'El prompt del paso 1 está escrito en inglés y clasifica de forma más fiable con entrada en inglés.',
+    tx_down_note: 'Quita esta capa y los tres se degradan a la vez, en silencio, justo con el correo más difícil de atender bien.',
+
+    tx_try_title: 'Pasa un texto por el modelo',
+    tx_try_sub: 'la llamada cruda al servicio, sin la comprobación de inglés, para que veas por ti mismo qué hace con inglés',
+    tx_run: 'Traducir',
+    tx_running: 'Traduciendo…',
+    tx_ph: 'Pega un correo en cualquier idioma.',
+    tx_chars: (n, max) => `${n} / ${max}`,
+    tx_bench_cost: 'Cuenta con diez a treinta segundos. El modelo corre en CPU y decodifica token a token: la página no está colgada.',
+    tx_sample_expect: (lang) => `en realidad ${lang}`,
+
+    tx_result_title: 'Resultado',
+    tx_tested_by: (who, when) => `ejecutado por ${who} · ${when}`,
+    tx_result_fail: 'El servicio no dio resultado.',
+    tx_claim_service: 'el servicio dice',
+    tx_claim_local: 'la comprobación local dice',
+    tx_claim_final: 'etiquetado como',
+    tx_claim_gate: 'en producción',
+    tx_claim_none: 'nada',
+    tx_claim_unserved: 'no es ninguno de los nueve que servimos',
+    tx_claim_script: (s) => `por el alfabeto · ${s}`,
+    tx_claim_words: 'por palabras funcionales',
+    tx_claim_by_service: 'ganó el servicio',
+    tx_claim_by_local: 'ganó la comprobación local',
+    tx_gate_skip: 'sin llamada',
+    tx_gate_call: 'llama al servicio',
+    tx_gate_note: 'qué decidiría el paso 1',
+    tx_latency: 'Tiempo real',
+    tx_chars_lbl: 'Caracteres',
+    tx_speed: 'Rendimiento',
+    tx_speed_v: (n) => `${n} caracteres/s`,
+    tx_paragraphs: 'Párrafos',
+    tx_out_title: 'Base en inglés',
+    tx_seg_title: 'Trozo a trozo',
+    tx_seg_sub: 'todos los trozos recibieron el mismo idioma que el correo',
+    tx_seg_odd: (n) => `${n} de estos trozos recibieron un idioma distinto al del correo entero. Esa discrepancia es la que puede decidir el idioma de la respuesta.`,
+    tx_seg_none: (n) => `${n} de estos trozos volvieron sin ninguna etiqueta de idioma: fasttext no identificó nada, que es lo que ocurre cuando el idioma queda fuera de la lista servida.`,
+    tx_seg_row: (p, i) => `párrafo ${p} · trozo ${i}`,
+    tx_seg_used: (l) => `traducido como ${l}`,
+
+    tx_fb_title: '¿Estuvo bien?',
+    tx_fb_sub: 'dos preguntas independientes: la traducción puede ser perfecta y el idioma estar mal. Cualquiera puede juzgar la prueba de cualquiera.',
+    tx_fb_quality: 'La traducción en sí',
+    tx_fb_good: 'Bien',
+    tx_fb_bad: 'Mal',
+    tx_fb_lang: 'El idioma que realmente es: viene preseleccionado con lo que decidió el pipeline, así que estar de acuerdo es un clic',
+    tx_fb_lang_saved: (l) => `idioma: ${l}`,
+    tx_fb_suggested: 'Tu traducción sugerida',
+    tx_fb_suggested_ph: 'Pega aquí la traducción que crees correcta.',
+    tx_fb_suggested_hint: 'Es opcional, pero útil cuando el modelo se equivoca en el texto.',
+    tx_fb_note_ph: '¿En qué se equivocó? (opcional)',
+    tx_fb_save: 'Guardar',
+    tx_fb_saving: 'Guardando…',
+    tx_fb_saved: 'Guardado.',
+    tx_fb_by: (who, when) => `por ${who} · ${when}`,
+    tx_verdict_good: 'Bien',
+    tx_verdict_bad: 'Mal',
+    tx_suggested_title: 'Traducción sugerida',
+    tx_suggested_short: 'tiene traducción sugerida',
+
+    tx_kpi_tests: 'Pruebas',
+    tx_kpi_tests_sub: (n) => `de ${n} ${n === 1 ? 'persona' : 'personas'}`,
+    tx_kpi_quality: 'Traducción',
+    tx_kpi_quality_sub: (n) => `juzgadas buenas, de ${n} juzgadas`,
+    tx_kpi_lang: 'Idioma',
+    tx_kpi_lang_sub: (n) => `acertados, de ${n} juzgados`,
+    tx_kpi_speed: 'Llamada media',
+    tx_kpi_speed_sub: (n) => `unos ${n} caracteres/s`,
+    tx_kpi_speed_none: 'por prueba',
+    tx_kpi_failed: 'Sin resultado',
+    tx_kpi_failed_sub: 'servicio caído o traducción vacía',
+    tx_chart_feedback: 'Distribución de feedback',
+    tx_chart_feedback_sub: 'traducciones buenas y malas en el registro público',
+    tx_chart_language: 'Idiomas detectados',
+    tx_chart_language_sub: 'lo que el pipeline pensó que era el idioma de origen',
+    tx_chart_truth: 'Idiomas corregidos por personas',
+    tx_chart_truth_sub: 'lo que la gente dijo que realmente era',
+    tx_chart_latency: 'Latencia de llamada',
+    tx_chart_latency_sub: 'tiempo de traducción agrupado por tramos',
+    tx_latency_bin_under5: '< 5 s',
+    tx_latency_bin_under15: '5-15 s',
+    tx_latency_bin_under30: '15-30 s',
+    tx_latency_bin_over30: '30 s+',
+    tx_th_tests: 'Pruebas',
+    tx_table_detected: 'Qué etiquetó el pipeline',
+    tx_table_confusion: 'Etiquetado × lo que dijo la gente',
+    tx_table_confusion_sub: 'la diagonal es acuerdo; cada celda fuera de ella es un correo que se habría respondido en el idioma equivocado',
+    tx_th_detected: 'Etiquetado',
+    tx_records_title: 'Registro de pruebas',
+    tx_records_sub: 'registro compartido, las más recientes primero: pulsa una fila para abrirla en el banco y juzgarla',
+    tx_records_empty: 'Todavía no se ha probado nada. Pasa un texto ahí arriba y aparecerá aquí a la vista de todos.',
+    tx_no_verdict: 'sin juicio todavía',
+    tx_toast_test_fail: (msg) => `No se pudo ejecutar la prueba: ${msg}`,
     compose_title: 'Escribir a soporte',
-    compose_desc: 'Elija el pedido sobre el que escribe y redacte su correo. Inglés o español: la respuesta sigue su idioma.',
+    compose_desc: 'Elija el pedido sobre el que escribe y redacte su correo. Se admiten nueve idiomas: cada correo se traduce al inglés para el análisis y la respuesta vuelve en el idioma en que usted escribió.',
     step1_text: 'Elija el pedido al que se refiere este correo',
     required: '(obligatorio)',
     step2_text: 'Escriba su correo',
@@ -1333,8 +2131,7 @@ const I18N = {
     reset_sample: 'Restaurar el texto de ejemplo',
     send_email: 'Enviar correo',
     sending: 'Enviando…',
-    chip_es: 'Detectado: español → respuesta en español',
-    chip_en: 'Detectado: inglés → respuesta en inglés',
+    chip_lang: (seen, reply) => `Detectado: ${seen} → respuesta en ${reply}`,
     err_choose_order: 'Elija primero el pedido al que se refiere este correo.',
     err_write_email: 'Escriba su correo antes de enviarlo.',
     err_not_delivered: (msg) => `No entregado. ${msg}`,
@@ -1459,9 +2256,19 @@ const TAG_LABELS = {
     high:     { en: 'High', zh: '高', es: 'Alta' },
     critical: { en: 'Critical', zh: '紧急', es: 'Crítica' },
   },
+  /* 翻译服务支持的 9 种语言（translation.SUPPORTED_LANGS）+ 一个 other。
+     `other` 不是"没识别出来"的占位，它的含义是"不在这 9 种里"——这类来信照样会被
+     翻成英文做分析，只是回信退回英文。 */
   language: {
     en:    { en: 'English', zh: '英语', es: 'Inglés' },
     es:    { en: 'Spanish', zh: '西班牙语', es: 'Español' },
+    de:    { en: 'German', zh: '德语', es: 'Alemán' },
+    fr:    { en: 'French', zh: '法语', es: 'Francés' },
+    it:    { en: 'Italian', zh: '意大利语', es: 'Italiano' },
+    pt:    { en: 'Portuguese', zh: '葡萄牙语', es: 'Portugués' },
+    zh:    { en: 'Chinese', zh: '中文', es: 'Chino' },
+    ja:    { en: 'Japanese', zh: '日语', es: 'Japonés' },
+    ko:    { en: 'Korean', zh: '韩语', es: 'Coreano' },
     other: { en: 'Other', zh: '其他', es: 'Otro' },
   },
   ambiguity: {
@@ -1593,10 +2400,11 @@ function setLang(lang) {
   if (state.scenarios.length) { renderScenarioFilters(); renderScenarioGrid(); }
   renderList();
   if (state.openThread) renderThread(state.openThread);
-  if (state.picked) updateLangChip();
+  updateLangChip();   // 还没选订单时写信框也开得起来，这枚提示要跟着界面语言走
   if (state.view === 'policy') renderPolicy();
   if (state.view === 'tags') renderTagView();
   if (state.view === 'emotion') renderEmotionView();
+  if (state.view === 'translation') renderTranslationView();
 }
 
 /* ------------------------------------------------------------ helpers --- */
@@ -1647,12 +2455,37 @@ function when(ts) {
       d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+/* 写信框上那枚"检测到 X 语 → 用 X 语回复"的提示。这是**预览**，不是权威判定：
+   真正决定回信语种的是服务端的 fasttext（translation.py），这里只是让人在点发送
+   之前就知道会收到什么语言的回信。所以词表可以粗——判错的代价是一枚提示，不是
+   一条链路。脚本层面能直接定的（中日韩）直接定，拉丁字母按功能词计数。 */
+const COMPOSE_LANG_MARKERS = {
+  es: /\b(hola|buenas|gracias|pedido|envío|envio|devolución|devolucion|reembolso|producto|compra|entrega|paquete|garantía|garantia|necesito|quiero|por favor|cuándo|dónde|pero|porque|también|todavía)\b/gi,
+  en: /\b(the|and|order|shipping|return|refund|please|thanks|hello|hi|delivery|package|warranty|need|want|when|where|but|because|still|would|could)\b/gi,
+  de: /\b(hallo|guten tag|danke|bestellung|lieferung|versand|rückerstattung|paket|garantie|bitte|ich|nicht|und|der|die|das|mein|meine|noch|aber|weil)\b/gi,
+  fr: /\b(bonjour|merci|commande|livraison|remboursement|colis|garantie|facture|je|mon|ma|mes|pas|et|le|la|les|des|mais|encore|très)\b/gi,
+  it: /\b(ciao|salve|grazie|ordine|spedizione|consegna|rimborso|pacco|garanzia|fattura|non|il|lo|gli|mio|mia|ma|perché|ancora|molto|sono)\b/gi,
+  pt: /\b(olá|bom dia|obrigado|obrigada|pedido|entrega|envio|reembolso|encomenda|garantia|fatura|eu|não|os|as|meu|minha|mas|porque|ainda|muito)\b/gi,
+};
+const COMPOSE_LANG_DIACRITICS = { es: /[ñ¿¡]/i, de: /[äöüß]/i, pt: /[ãõ]/i, fr: /[œêûëï]/i };
+
 function detectLang(text) {
   if (!text || !text.trim()) return 'en';
-  let es = (text.match(/\b(hola|buenas|gracias|pedido|envío|envio|devolución|devolucion|reembolso|producto|compra|entrega|paquete|garantía|garantia|necesito|quiero|por favor|cuándo|dónde|pero|porque|también|todavía)\b/gi) || []).length;
-  const en = (text.match(/\b(the|and|order|shipping|return|refund|please|thanks|hello|hi|delivery|package|warranty|need|want|when|where|but|because|still|would|could)\b/gi) || []).length;
-  if (/[áéíóúñ¿¡]/i.test(text)) es += 3;
-  return es > en ? 'es' : 'en';
+  if (/[가-힯]/.test(text)) return 'ko';
+  if (/[぀-ヿ]/.test(text)) return 'ja';
+  if (/[一-鿿]/.test(text)) return 'zh';
+  if (/[Ѐ-ӿ؀-ۿ฀-๿]/.test(text)) return 'other';
+
+  let best = 'en';
+  let bestScore = 0;
+  for (const [lang, re] of Object.entries(COMPOSE_LANG_MARKERS)) {
+    let score = (text.match(re) || []).length;
+    const dia = COMPOSE_LANG_DIACRITICS[lang];
+    if (dia && dia.test(text)) score += 3;
+    // 平手时英语胜出：兜底语种和整条链路的基准语种保持一致
+    if (score > bestScore || (score === bestScore && lang === 'en')) { best = lang; bestScore = score; }
+  }
+  return bestScore ? best : 'en';
 }
 
 function toast(message, ms = 3200) {
@@ -1694,23 +2527,35 @@ async function boot() {
     renderScenarioFilters();
     renderScenarioGrid();
     await refreshThreads();
-    // 情绪测试台的计数挂在 rail 上，不进那个页面也要显示；这一路失败不该拖垮启动
+    // 两个测试台的计数挂在 rail 上，不进那个页面也要显示；这两路失败都不该拖垮启动
     api('/api/emotion/stats?scope=all')
       .then((s) => { $('#count-emotion').textContent = s.total; })
+      .catch(() => {});
+    api('/api/translation/stats?scope=all')
+      .then((s) => { $('#count-translation').textContent = s.total; })
       .catch(() => {});
 
     const params = new URLSearchParams(location.search);
     const wanted = params.get('view');
-    // 子页要在 setView 之前定好：setView('emotion') 会把当前子页写回 URL
-    if (EMO_TABS.includes(params.get('tab'))) state.emoTab = params.get('tab');
+    // 子页要在 setView 之前定好：setView('emotion') 会把当前子页写回 URL。
+    // 两个页共用 ?tab=，各自只认自己词表里的值。
+    const tab = params.get('tab');
+    if (EMO_TABS.includes(tab)) state.emoTab = tab;
+    if (TX_TABS.includes(tab)) state.txTab = tab;
     if (DEEP_VIEWS.includes(wanted) && wanted !== 'mail') setView(wanted);
-    // ?test=<id> 直接把某一条测试载进结果卡——"你看模型把我这句话读成什么了"
-    // 是要发给别人看的，链接得能指到具体那一条。必须等词表到位再打开：
-    // renderEmotionView() 在 emoMeta 为空时直接返回，结果卡还没进 DOM 就滚不过去。
+    // ?test=<id> / ?tx=<id> 直接把某一条测试载进结果卡——"你看模型把我这句话读成
+    // 什么了"是要发给别人看的，链接得能指到具体那一条。必须等词表到位再打开：
+    // render*View() 在 meta 为空时直接返回，结果卡还没进 DOM 就滚不过去。
     const testId = Number(params.get('test'));
     if (testId) {
       Promise.all([loadEmotionMeta(), api(`/api/emotion/tests/${testId}`)])
         .then(([, test]) => { setView('emotion'); openEmotionTest(test); })
+        .catch(() => {});
+    }
+    const txId = Number(params.get('tx'));
+    if (txId) {
+      Promise.all([loadTranslationMeta(), api(`/api/translation/tests/${txId}`)])
+        .then(([, test]) => { setView('translation'); openTranslationTest(test); })
         .catch(() => {});
     }
   } catch (err) {
@@ -1770,7 +2615,7 @@ function renderList() {
 
     const tags = el('div', 'mailrow__tags');
     tags.append(el('span', 'tag', threadScenarioTitle(t)));
-    tags.append(el('span', 'tag tag--lang', t.in_language === 'es' ? 'ES' : 'EN'));
+    tags.append(el('span', 'tag tag--lang', (t.in_language || 'en').toUpperCase()));
     if (t.tags && t.tags.intent) {
       tags.append(el('span', 'tag tag--intent', tagLabel('intent', t.tags.intent)));
     }
@@ -1821,7 +2666,7 @@ function renderThread(t) {
   meta.append(el('span', null, '·'));
   meta.append(el('span', null, new Date(t.created_at * 1000).toLocaleString()));
   meta.append(el('span', null, '·'));
-  meta.append(el('span', null, t.in_language === 'es' ? tr('written_es') : tr('written_en')));
+  meta.append(el('span', null, tr('written_in', tagLabel('language', t.in_language || 'en'))));
   if (t.latency_ms) { meta.append(el('span', null, '·'), el('span', null, `${(t.latency_ms / 1000).toFixed(1)}s`)); }
   head.append(meta);
   wrap.append(head);
@@ -1836,6 +2681,10 @@ function renderThread(t) {
   out.append(outHead, el('div', 'msg__body', t.body));
   wrap.append(out);
 
+  /* step 0: the English text every downstream model actually read */
+  const baseline = baselineCard(t.translation);
+  if (baseline) wrap.append(baseline);
+
   /* step 1: what the analyser made of that email */
   wrap.append(analysisCard(t.tags));
 
@@ -1849,7 +2698,7 @@ function renderThread(t) {
   const rFrom = el('div', 'msg__from', 'Mira Castellanos');
   rFrom.append(el('span', null, 'Helios Customer Care · care@helios.example'));
   rHead.append(rFrom);
-  if (t.reply_language) rHead.append(el('div', 'msg__when', t.reply_language === 'es' ? tr('lang_es') : tr('lang_en')));
+  if (t.reply_language) rHead.append(el('div', 'msg__when', tagLabel('language', t.reply_language)));
   // A human agent's override is marked distinctly from the AI's own draft
   if (t.reply_source === 'manual') rHead.append(el('span', 'tag tag--manual', tr('manual_reply_tag')));
   reply.append(rHead);
@@ -1963,6 +2812,42 @@ function tagChip(group, value, confidence) {
     chip.append(el('span', 'tagchip__c', tr('confidence', confidence)));
   }
   return chip;
+}
+
+/* 英文基准（Step 0）。展示它是因为下面那张分析卡上的每一个判断——情绪、意图、
+   命中的复核关键词——读的都是这份译文而不是客户的原文，不摆出来的话就没法核对
+   "模型到底读到了什么"。原文本来就是英文（translated=false 且没报错）时整块不渲染：
+   同一段文字登两遍不是信息。翻译失败时反过来要渲染，那正是"分析在原文上跑的、
+   会退化"这件事该被看见的时候。 */
+function baselineCard(tx) {
+  if (!tx || (!tx.translated && !tx.error)) return null;
+
+  const card = el('div', 'analysis analysis--baseline');
+  const head = el('div', 'analysis__head');
+  head.append(el('span', 'analysis__title', tr('baseline_title')));
+  if (tx.latency_ms) head.append(el('span', 'analysis__ms', tr('baseline_ms', tx.latency_ms)));
+  card.append(head);
+
+  if (tx.error) {
+    card.append(el('p', 'analysis__flag', tr('baseline_failed', tx.error)));
+    return card;
+  }
+
+  const langName = tagLabel('language', tx.source_lang || 'other');
+  card.append(el('p', 'analysis__summary', tr('baseline_note', langName)));
+
+  const panel = el('div', 'panel');
+  const resultHead = el('div', 'panel__head');
+  resultHead.append(el('span', null, tr('baseline_result_title')));
+  resultHead.append(el('span', 'analysis__ms', tr('baseline_result_note', langName)));
+  panel.append(resultHead);
+
+  const result = [];
+  if (tx.subject) result.push(`${tr('baseline_subject')}: ${tx.subject}`);
+  if (tx.body) result.push(tx.body);
+  panel.append(el('div', 'txout', result.join('\n\n') || ''));
+  card.append(panel);
+  return card;
 }
 
 function analysisCard(tags) {
@@ -2178,7 +3063,9 @@ function pickScenario(id) {
 
 function updateLangChip() {
   const lang = detectLang(`${$('#c-subject').value}\n${$('#c-body').value}`);
-  $('#lang-chip').textContent = lang === 'es' ? tr('chip_es') : tr('chip_en');
+  // 不在支持列表里的语种（other）照样会被翻成英文做分析，但回信退回英文
+  const reply = lang === 'other' ? 'en' : lang;
+  $('#lang-chip').textContent = tr('chip_lang', tagLabel('language', lang), tagLabel('language', reply));
 }
 
 /* ------------------------------------------------------------ details --- */
@@ -2253,24 +3140,31 @@ function showDetails(scenarioId) {
 /* The bench and the analytics view are shared boards — "look at what the model
    did to my sentence" is a thing you send someone. So the view lives in the URL
    and a pasted link opens on the right panel. */
-const DEEP_VIEWS = ['mail', 'policy', 'tags', 'emotion'];
+const DEEP_VIEWS = ['mail', 'policy', 'tags', 'emotion', 'translation'];
 
 function setView(view) {
   state.view = view;
   const url = new URL(location.href);
   if (view === 'mail') url.searchParams.delete('view');
   else url.searchParams.set('view', view);
+  // 两个模型页共用 ?tab=，它们互斥所以不会打架；深链的记录 id 各用各的参数
   if (view === 'emotion') {
     url.searchParams.set('tab', state.emoTab);
+    url.searchParams.delete('tx');
+  } else if (view === 'translation') {
+    url.searchParams.set('tab', state.txTab);
+    url.searchParams.delete('test');
   } else {
     url.searchParams.delete('tab');
     url.searchParams.delete('test');
+    url.searchParams.delete('tx');
   }
   history.replaceState(null, '', url);
   const ws = document.querySelector('.workspace');
   ws.classList.toggle('is-policy', view === 'policy');
   ws.classList.toggle('is-tags', view === 'tags');
   ws.classList.toggle('is-emotion', view === 'emotion');
+  ws.classList.toggle('is-translation', view === 'translation');
   document.querySelectorAll('.rail__item[data-view]').forEach((b) => {
     b.classList.toggle('is-active', b.dataset.view === view);
   });
@@ -2286,6 +3180,9 @@ function setView(view) {
     // 免得第一次进页面时先闪一屏空白
     renderEmotionView();
     loadEmotionMeta().then(() => { renderEmotionView(); return refreshEmotion(); });
+  } else if (view === 'translation') {
+    renderTranslationView();
+    loadTranslationMeta().then(() => { renderTranslationView(); return refreshTranslation(); });
   }
 }
 
@@ -2562,8 +3459,10 @@ function stackedChart(titleKey, subKey, group, order, colorFor, dist, classified
   return card;
 }
 
-/* The table twin of a distribution chart: same numbers, no colour needed. */
-function breakdownTable(titleKey, group, order, dist, classified) {
+/* The table twin of a distribution chart: same numbers, no colour needed.
+   `countKey` names what is being counted — emails on the tag analytics page,
+   bench runs on the translation page. */
+function breakdownTable(titleKey, group, order, dist, classified, countKey = 'th_emails') {
   const rows = order.filter((v) => dist[v]);
   if (!rows.length) return null;
 
@@ -2572,7 +3471,7 @@ function breakdownTable(titleKey, group, order, dist, classified) {
   const thead = el('thead');
   const hr = el('tr');
   hr.append(el('th', null, tr('th_tag')));
-  hr.append(el('th', 'dtable__num', tr('th_emails')));
+  hr.append(el('th', 'dtable__num', tr(countKey)));
   hr.append(el('th', 'dtable__num', tr('th_share')));
   thead.append(hr);
   table.append(thead);
@@ -2596,6 +3495,35 @@ function breakdownTable(titleKey, group, order, dist, classified) {
   table.append(tfoot);
 
   card.append(table);
+  return card;
+}
+
+function distributionChart(title, sub, dist, total, labelFor, colorFor, order = null) {
+  const entries = (order || Object.keys(dist))
+    .filter((value) => dist[value])
+    .map((value) => [value, dist[value]]);
+  if (!order) entries.sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return null;
+
+  const card = chartCard(title, sub);
+  const max = Math.max(...entries.map(([, count]) => count));
+  const plot = el('div', 'barlist');
+  for (const [value, count] of entries) {
+    const row = el('div', 'barlist__row');
+    row.title = `${labelFor(value)} · ${tr('n_emails', count)} · ${tr('of_total', pct(count, total))}`;
+    row.append(el('span', 'barlist__name', labelFor(value)));
+
+    const track = el('span', 'barlist__track');
+    const fill = el('span', 'barlist__fill');
+    fill.style.width = `${(count / max) * 100}%`;
+    fill.style.background = typeof colorFor === 'function' ? colorFor(value) : colorFor;
+    track.append(fill);
+    row.append(track);
+
+    row.append(el('span', 'barlist__val', String(count)));
+    plot.append(row);
+  }
+  card.append(plot);
   return card;
 }
 
@@ -3788,6 +4716,1041 @@ async function refreshEmotion() {
   if (state.view === 'emotion') renderEmotionView();
 }
 
+/* ---------------------------------------------- translation model view --- */
+/* The second local model gets the same five-page treatment as the first, and
+   reuses its component library wholesale (the emo- prefixed classes are the
+   shared vocabulary for "documenting a local model", not an emotion scope).
+   What differs is what there is to be wrong about: emotion has one output to
+   judge, translation has two independent ones — the text that came back, and
+   the language the service says it was in. A Russian email can come back
+   perfectly translated and still be tagged `en`, which is why the feedback form
+   has an axis for each and the log counts them separately. */
+
+const TX_TABS = ['model', 'pipeline', 'langs', 'bench', 'log'];
+
+const langLabel = (code) => (code ? tagLabel('language', code) : '—');
+
+function setTxTab(tab) {
+  if (!TX_TABS.includes(tab) || tab === state.txTab) return;
+  state.txTab = tab;
+  const url = new URL(location.href);
+  url.searchParams.set('tab', tab);
+  // ?tx= 指的是载进测试台的那一条，离开测试台之后这个参数就没有指向了
+  if (tab !== 'bench') url.searchParams.delete('tx');
+  history.replaceState(null, '', url);
+  renderTranslationView();
+  $('#translation-body').scrollTop = 0;
+}
+
+/* ------------------------------------------------------ sub-page: model -- */
+
+/* The identity block: name, one paragraph on why this layer exists, and the
+   four numbers someone arrives wanting. They are stat tiles rather than rows in
+   the spec list below because a number you have to find in an eight-row table
+   is a number the page failed to tell you. */
+function txHeroCard(meta) {
+  const m = meta.model || {};
+  const p = meta.probe || {};
+  const hero = chartCard(tr('tx_model_title'), tr('tx_model_sub'));
+  hero.classList.add('emomodel');
+
+  const id = el('div', 'emomodel__id');
+  if (m.home) {
+    const link = el('a', 'emomodel__name', m.id);
+    link.href = m.home;
+    link.target = '_blank';
+    link.rel = 'noreferrer noopener';
+    id.append(link);
+  } else {
+    id.append(el('span', 'emomodel__name', m.id || '—'));
+  }
+  if (m.license) id.append(el('span', 'emomodel__badge', m.license));
+  if (m.vendor) id.append(el('span', 'emomodel__badge', `${m.vendor} · ${m.released}`));
+
+  const live = el('span', 'txlive' + (p.ok ? '' : ' is-down'));
+  live.append(el('span', 'txlive__dot'));
+  live.append(el('span', null, p.ok ? tr('tx_probe_live') : tr('tx_probe_down_short')));
+  id.append(live);
+  hero.append(id);
+
+  hero.append(el('p', 'emomodel__lede', tr('tx_model_lede')));
+
+  const runs = (meta.measured || {}).runs || [];
+  const times = runs.map((r) => r.ms).sort((a, b) => a - b);
+  const span = times.length
+    ? (times.length > 1
+      ? `${(times[0] / 1000).toFixed(1)}–${(times[times.length - 1] / 1000).toFixed(0)}s`
+      : `${(times[0] / 1000).toFixed(1)}s`)
+    : '—';
+
+  const dl = el('dl', 'kv kv--fact');
+  kvRow(dl, tr('tx_stat_size'), m.params || '—', tr('tx_stat_size_sub'));
+  kvRow(dl, tr('tx_stat_langs'), `${m.served_languages} / ${m.model_languages}`,
+    tr('tx_stat_langs_sub'));
+  kvRow(dl, tr('tx_stat_ctx'), String(m.context_tokens || '—'), tr('tx_stat_ctx_sub'));
+  kvRow(dl, tr('tx_stat_call'), span, tr('tx_stat_call_sub', (meta.measured || {}).device));
+  hero.append(dl);
+
+  const links = el('p', 'emonote');
+  for (const [href, key] of [[m.paper, 'tx_link_paper'], [m.repo, 'tx_link_repo']]) {
+    if (!href) continue;
+    if (links.childNodes.length) links.append(document.createTextNode(' · '));
+    const a = el('a', 'emomodel__name', tr(key));
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noreferrer noopener';
+    links.append(a);
+  }
+  if (links.childNodes.length) hero.append(links);
+  return hero;
+}
+
+/* What is loaded on that machine right now, asked of the service rather than
+   read off the model card. A card can say "Hy-MT2-1.8B" while the endpoint
+   serves something else entirely; only the probe can tell you which. */
+function txDeployCard(meta) {
+  const p = meta.probe || {};
+  const card = chartCard(tr('tx_deploy_title'), tr('tx_deploy_sub'));
+
+  if (!p.ok) {
+    card.append(el('p', 'analysis__fail', tr('tx_probe_down', p.error || '—')));
+    return card;
+  }
+
+  const dl = el('dl', 'kv kv--fact');
+  kvRow(dl, tr('tx_deploy_model'), p.model_path || '—');
+  kvRow(dl, tr('tx_deploy_device'), p.device || '—');
+  kvRow(dl, tr('tx_deploy_lid'),
+    p.fasttext_ready ? tr('tx_probe_ready') : tr('tx_probe_notready'), p.fasttext_path);
+  kvRow(dl, tr('tx_deploy_langs'), (p.served_languages || []).join(' · ') || '—');
+  kvRow(dl, tr('tx_deploy_endpoint'),
+    meta.enabled ? tr('tx_spec_serving_on', meta.timeout) : tr('tx_spec_serving_off'));
+  card.append(dl);
+
+  // 服务开放的语种和我们的词表对不上：不是崩溃，但也不能悄悄过去
+  if ((p.drift || []).length) {
+    card.append(el('p', 'txdrift', tr('tx_deploy_drift', p.drift.join(', '))));
+  }
+  return card;
+}
+
+/* The spec list, minus everything the hero already said. What is left is the
+   part that changes how you read a result: it is a general LM, so it is
+   prompted rather than translated-by-construction, and it decodes at
+   temperature 0.7. */
+function txSpecCard(meta) {
+  const m = meta.model || {};
+  const card = chartCard(tr('tx_model_title'), tr('tx_model_sub'));
+
+  const dl = el('dl', 'kv kv--fact');
+  kvRow(dl, tr('tx_spec_arch'), tr('tx_spec_arch_v'), m.arch);
+  const d = m.decoding || {};
+  kvRow(dl, tr('tx_spec_decoding'),
+    [`temp ${d.temperature}`, `top_p ${d.top_p}`, `top_k ${d.top_k}`,
+     `rep ${d.repetition_penalty}`].join(' · '));
+  kvRow(dl, tr('tx_spec_context'), tr('tx_spec_context_v', m.context_tokens));
+  card.append(dl);
+
+  card.append(el('p', 'emonote', tr('tx_model_why')));
+  return card;
+}
+
+/* The family, so the size we run reads as a choice rather than the only option.
+   1.8B is the one that fits on a CPU box; the row says which one is ours. */
+function txFamilyCard(meta) {
+  const rows = (meta.model || {}).family || [];
+  if (!rows.length) return null;
+  const card = chartCard(tr('tx_family_title'), tr('tx_family_sub'));
+
+  const table = el('table', 'dtable');
+  const thead = el('thead');
+  const hr = el('tr');
+  hr.append(el('th', null, tr('tx_th_variant')));
+  hr.append(el('th', null, tr('tx_th_kind')));
+  hr.append(el('th', 'dtable__num', tr('tx_th_size')));
+  thead.append(hr);
+  table.append(thead);
+
+  const tbody = el('tbody');
+  for (const v of rows) {
+    // 我们跑的是哪个尺寸，是这张表唯一会被问的问题——所以标在整行上，不只是一枚徽章
+    const line = el('tr', v.ours ? 'is-ours' : null);
+    const name = el('td');
+    name.append(el('code', 'emofield', v.id));
+    if (v.ours) name.append(el('span', 'emomodel__badge', tr('tx_family_ours')));
+    line.append(name);
+    line.append(el('td', null, v.kind));
+    line.append(el('td', 'dtable__num', v.params));
+    tbody.append(line);
+  }
+  table.append(tbody);
+  card.append(table);
+  return card;
+}
+
+/* The vendor's own evaluation, labelled as theirs. Kept in a card of its own so
+   that a benchmark win can never sit next to a latency we measured and read as
+   the same kind of fact. */
+function txVendorCard(meta) {
+  const claims = (meta.model || {}).claims || [];
+  if (!claims.length) return null;
+  const card = chartCard(tr('tx_vendor_title'), tr('tx_vendor_sub'));
+
+  const list = el('div', 'txclaims');
+  for (const c of claims) {
+    const item = el('div', 'txclaims__item');
+    item.append(document.createTextNode(tr(`tx_claim_${c.claim}`)));
+    item.append(el('span', 'txclaims__scope', c.scope));
+    list.append(item);
+  }
+  card.append(list);
+  return card;
+}
+
+/* What it costs on this box. The bar in the time column is one series, one hue,
+   with the number in text above it — its whole job is to make the shape visible
+   at a glance: 27× the input length is not 27× the wait, and the shortest text
+   on the list still costs seconds. */
+function txCostCard(meta) {
+  const runs = (meta.measured || {}).runs || [];
+  if (!runs.length) return null;
+  const card = chartCard(tr('tx_cost_title'),
+    tr('tx_measured_sub', (meta.measured || {}).date, (meta.measured || {}).device));
+
+  const table = el('table', 'dtable');
+  const thead = el('thead');
+  const hr = el('tr');
+  hr.append(el('th', null, tr('tx_th_case')));
+  hr.append(el('th', 'dtable__num', tr('tx_th_chars')));
+  hr.append(el('th', 'dtable__num', tr('tx_th_segments')));
+  // 这一列左对齐：格子里除了数字还有一根条，数字要和条的起点对齐才读得成一组
+  hr.append(el('th', 'txtime', tr('tx_th_ms')));
+  thead.append(hr);
+  table.append(thead);
+
+  const bySample = Object.fromEntries((meta.samples || []).map((s) => [s.id, s]));
+  const peak = Math.max(...runs.map((r) => r.ms));
+  const tbody = el('tbody');
+  for (const run of runs) {
+    const line = el('tr');
+    const cell = el('td');
+    const sample = bySample[run.sample];
+    // 用例的原文就是这一行的标签：数字要能对上具体是哪段文字
+    cell.append(el('span', 'emoquote', sample ? sample.text.slice(0, 44) : run.sample));
+    line.append(cell);
+    line.append(el('td', 'dtable__num', String(run.chars)));
+    line.append(el('td', 'dtable__num', String(run.segments)));
+
+    const time = el('td', 'txtime');
+    time.append(el('span', null, `${(run.ms / 1000).toFixed(1)}s`));
+    const track = el('span', 'txbar');
+    const fill = el('span', 'txbar__fill');
+    fill.style.width = `${(run.ms / peak) * 100}%`;
+    fill.style.background = VIZ.intentBar;
+    track.append(fill);
+    time.append(track);
+    line.append(time);
+    tbody.append(line);
+  }
+  table.append(tbody);
+  card.append(table);
+  card.append(el('p', 'emonote', tr('tx_measured_note')));
+  return card;
+}
+
+/* ---------------------------------------------------- sub-page: pipeline -- */
+
+/* Nine steps, tagged by who owns them. The card exists to make two points at a
+   glance: exactly one step is the model, and four of the other eight are ours —
+   so most of what can go wrong here is our code, not the weights. */
+function txPipelineCard(meta) {
+  const steps = (meta.spec || {}).pipeline || [];
+  if (!steps.length) return null;
+  const card = chartCard(tr('tx_chain_title'), tr('tx_chain_sub'));
+
+  // 归属图例。九行上每行都挂一个标签，不先说清楚这三个词的意思，标签就只是装饰。
+  const keys = el('div', 'txkeys');
+  for (const who of ['client', 'service', 'model']) {
+    const item = el('span', 'txkeys__item');
+    item.append(el('span', `txlane__who is-${who}`, tr(`tx_who_${who}`)));
+    item.append(el('span', null, tr(`tx_who_${who}_d`)));
+    keys.append(item);
+  }
+  card.append(keys);
+
+  const lane = el('div', 'txlane');
+  for (const s of steps) {
+    const row = el('div', 'txlane__row' + (s.where === 'model' ? ' is-model' : ''));
+    row.append(el('span', 'txlane__n', String(s.step)));
+    row.append(el('span', `txlane__who is-${s.where}`, tr(`tx_who_${s.where}`)));
+    const text = el('div');
+    text.append(el('div', 'txlane__t', tr(`tx_step_${s.key}_t`)));
+    text.append(el('p', 'txlane__d', s.key === 'segments'
+      ? tr('tx_step_segments_d', (meta.spec || {}).max_segment_chars)
+      : tr(`tx_step_${s.key}_d`)));
+    row.append(text);
+    lane.append(row);
+  }
+  card.append(lane);
+  card.append(el('p', 'emonote', tr('tx_chain_note')));
+  return card;
+}
+
+function txContractCard(meta) {
+  const fields = (meta.spec || {}).response_fields || [];
+  if (!fields.length) return null;
+  const card = chartCard(tr('tx_contract_title'), tr('tx_contract_sub'));
+
+  const table = el('table', 'dtable');
+  const thead = el('thead');
+  const hr = el('tr');
+  hr.append(el('th', null, tr('tx_th_field')));
+  hr.append(el('th', null, tr('tx_th_meaning')));
+  thead.append(hr);
+  table.append(thead);
+
+  const tbody = el('tbody');
+  for (const f of fields) {
+    const line = el('tr');
+    const key = el('td');
+    key.append(el('code', 'emofield', f));
+    line.append(key);
+    // 字段名里的点会被 i18n 的 key 吃掉，换成下划线再查
+    line.append(el('td', null, tr(`tx_field_${f.replace(/\./g, '_')}`)));
+    tbody.append(line);
+  }
+  table.append(tbody);
+  card.append(table);
+  return card;
+}
+
+/* The four things this service does that the contract does not say it does.
+   Each one has a sample behind it, so the claim is one click from being
+   re-checked rather than something you have to take on trust. */
+function txKnownCard(meta) {
+  const rows = (meta.spec || {}).known_behaviours || [];
+  if (!rows.length) return null;
+  const card = chartCard(tr('tx_known_title'), tr('tx_known_sub'));
+
+  const list = el('div', 'emolimits');
+  const bySample = Object.fromEntries((meta.samples || []).map((s) => [s.id, s]));
+  for (const b of rows) {
+    const item = el('div', 'emolimits__item' + (b.severity === 'warn' ? ' is-review' : ' is-choice'));
+    item.append(el('div', 'emolimits__t', tr(`tx_known_${b.key}_t`)));
+    item.append(el('p', 'emolimits__d', tr(`tx_known_${b.key}_d`)));
+
+    const foot = el('p', 'emonote');
+    foot.append(el('span', 'emocovers', b.evidence));
+    const sample = bySample[b.sample];
+    if (sample) {
+      foot.append(document.createTextNode(' · '));
+      const run = el('button', 'linkbtn', tr('tx_known_try'));
+      run.type = 'button';
+      run.addEventListener('click', () => {
+        state.txDraft = sample.text;
+        setTxTab('bench');
+        runTranslationTest(sample.text, sample.id);
+      });
+      foot.append(run);
+    }
+    item.append(foot);
+    list.append(item);
+  }
+  card.append(list);
+  return card;
+}
+
+/* ----------------------------------------------------- sub-page: langs --- */
+
+function txLangsCard(meta) {
+  const vocab = meta.vocabulary || {};
+  const langs = vocab.languages || [];
+  if (!langs.length) return null;
+  const card = chartCard(tr('tx_langs_title'),
+    tr('tx_langs_sub', (meta.model || {}).model_languages, langs.length));
+
+  const grid = el('div', 'txlangs');
+  for (const l of langs) {
+    const cell = el('div', 'txlang' + (l.base ? ' is-base' : ''));
+    cell.append(el('span', 'txlang__code', l.code));
+    cell.append(el('span', 'txlang__name', langLabel(l.code)));
+    if (l.base) cell.append(el('span', 'emomodel__badge', tr('tx_base_tag')));
+    grid.append(cell);
+  }
+  // 第 10 个取值。它不是"没识别出来"的占位，含义是"不在这 9 种里"，所以画成虚线
+  // 而不是和那 9 个并列——收到这种来信照样翻译照样分析，只是回信退回英文。
+  const other = el('div', 'txlang is-other');
+  other.append(el('span', 'txlang__code', vocab.unknown_lang || 'other'));
+  other.append(el('span', 'txlang__name', langLabel('other')));
+  grid.append(other);
+  card.append(grid);
+
+  card.append(el('p', 'emonote', tr('tx_langs_note')));
+  card.append(el('p', 'emonote', tr('tx_other_d')));
+  return card;
+}
+
+/* Who reads the English baseline. Without this the translation layer looks like
+   a courtesy for human readers; it is not for humans at all — the customer never
+   sees it, three downstream models do. */
+function txDownstreamCard(meta) {
+  const rows = (meta.spec || {}).downstream || [];
+  if (!rows.length) return null;
+  const card = chartCard(tr('tx_down_title'), tr('tx_down_sub'));
+
+  const list = el('div', 'emolimits');
+  for (const d of rows) {
+    const item = el('div', 'emolimits__item');
+    item.append(el('div', 'emolimits__t', tr(`tx_down_${d.key}_t`)));
+    item.append(el('p', 'emolimits__d', tr(`tx_down_${d.key}_d`)));
+    list.append(item);
+  }
+  card.append(list);
+  card.append(el('p', 'emonote', tr('tx_down_note')));
+  return card;
+}
+
+/* The rule that decides what language the customer is answered in — the one
+   output of this whole layer the customer actually sees. */
+function txReplyCard(meta) {
+  const card = chartCard(tr('tx_reply_title'), tr('tx_reply_sub'));
+  const list = el('div', 'emolimits');
+  for (const key of ['native', 'fallback', 'never']) {
+    const item = el('div', 'emolimits__item is-choice');
+    item.append(el('div', 'emolimits__t', tr(`tx_reply_${key}_t`)));
+    item.append(el('p', 'emolimits__d', tr(`tx_reply_${key}_d`)));
+    list.append(item);
+  }
+  card.append(list);
+  return card;
+}
+
+/* ----------------------------------------------------- sub-page: bench --- */
+
+function txBenchCard(meta) {
+  const card = chartCard(tr('tx_try_title'), tr('tx_try_sub'));
+
+  const run = el('button', 'btn btn--primary', state.txBusy ? tr('tx_running') : tr('tx_run'));
+  run.type = 'button';
+  run.disabled = !state.txDraft.trim() || state.txBusy;
+
+  const ta = el('textarea', 'emoinput');
+  ta.id = 'tx-text';
+  ta.rows = 4;
+  ta.maxLength = meta.max_chars;
+  ta.placeholder = tr('tx_ph');
+  ta.value = state.txDraft;
+  const counter = el('span', 'emobench__count', tr('tx_chars', state.txDraft.length, meta.max_chars));
+  ta.addEventListener('input', () => {
+    state.txDraft = ta.value;
+    counter.textContent = tr('tx_chars', ta.value.length, meta.max_chars);
+    run.disabled = !ta.value.trim() || state.txBusy;
+  });
+  card.append(ta);
+
+  run.addEventListener('click', () => runTranslationTest(ta.value, null));
+  const foot = el('div', 'emobench__foot');
+  foot.append(counter);
+  foot.append(run);
+  card.append(foot);
+
+  // 这一句不是装饰：CPU 上一次调用要十几秒，不先说清楚的话第一次点下去像是卡死了
+  card.append(el('p', 'emonote', tr('tx_bench_cost')));
+
+  // 十二张几乎一样的卡片铺成一个网格就是一堵墙。日常来信和"故意会翻车"的三条是两类
+  // 东西，分组之后点哪一条才是有意图的选择。分组来自后端的 kind 字段，不在前端按 id 硬编。
+  for (const [kind, titleKey, descKey] of [
+    ['normal', 'tx_group_normal', 'tx_group_normal_d'],
+    ['edge', 'tx_group_edge', 'tx_group_edge_d'],
+  ]) {
+    const group = meta.samples.filter((s) => s.kind === kind);
+    if (!group.length) continue;
+
+    const box = el('div', 'txgroup');
+    const head = el('div', 'txgroup__head');
+    head.append(el('span', 'txgroup__t', tr(titleKey)));
+    head.append(el('span', 'txgroup__d', tr(descKey)));
+    box.append(head);
+
+    const chips = el('div', 'emosamples');
+    for (const s of group) {
+      const chip = el('button', 'emosample' + (kind === 'edge' ? ' is-edge' : ''));
+      chip.type = 'button';
+      chip.append(el('span', 'emosample__text', s.text));
+      const hint = el('span', 'emosample__hint');
+      // 语种码放在最前面：扫一列用例时，先看见的应该是"这是哪国话"
+      hint.append(el('span', 'emosample__code', s.expect));
+      hint.append(document.createTextNode(tr('tx_sample_expect', langLabel(s.expect))));
+      chip.append(hint);
+      chip.title = s.text;
+      chip.addEventListener('click', () => {
+        state.txDraft = s.text;
+        runTranslationTest(s.text, s.id);
+      });
+      chips.append(chip);
+    }
+    box.append(chips);
+    card.append(box);
+  }
+  return card;
+}
+
+/* The bench with nothing loaded used to be a card and then half a screen of
+   nothing. The recent runs belong here anyway: the first useful thing on a
+   shared board is what other people just tried. */
+function txRecentCard() {
+  const card = chartCard(tr('tx_recent_title'), tr('tx_recent_sub'));
+  const recent = state.txTests.slice(0, 4);
+  if (!recent.length) {
+    card.append(el('p', 'list__empty', tr('tx_recent_empty')));
+    return card;
+  }
+  const list = el('div', 'emolog');
+  for (const t of recent) {
+    const row = el('button', 'emolog__row');
+    row.type = 'button';
+    const top = el('div', 'emolog__top');
+    top.append(el('code', 'emofield', t.source_lang || '—'));
+    top.append(el('span', 'emolog__pred', t.error ? tr('tx_kpi_failed') : langLabel(t.source_lang)));
+    if (t.latency_ms) top.append(el('span', 'emolog__score', `${(t.latency_ms / 1000).toFixed(1)}s`));
+    top.append(el('span', 'emolog__meta', `${emoShortUser(t.user_id)} · ${fmtWhen(t.created_at)}`));
+    row.append(top);
+    row.append(el('p', 'emolog__text', t.text));
+    row.addEventListener('click', () => openTranslationTest(t));
+    list.append(row);
+  }
+  card.append(list);
+  return card;
+}
+
+/* Three claims about one email's language, side by side, with the winner marked.
+   This is the arbitration in translation.resolve_source_lang() made visible: it
+   is the only way to tell an LID miss from a translation miss, and they need
+   completely different fixes. */
+function txClaimRow(r) {
+  const box = el('div', 'txverdict');
+
+  const claim = (key, value, note, won) => {
+    const cell = el('div', 'txclaim' + (won ? ' is-won' : ''));
+    cell.append(el('div', 'txclaim__k', tr(key)));
+    cell.append(el('div', 'txclaim__v', value));
+    if (note) cell.append(el('div', 'txclaim__n', note));
+    return cell;
+  };
+
+  // 服务端原样报的值。不在我们开放的 9 种里时要标出来——ru_unsupported 那条已知
+  // 行为就是靠这一格和下面的"最终"格对不上才看得见。
+  box.append(claim('tx_claim_service',
+    r.raw_lang ? langLabel(r.raw_lang) : tr('tx_claim_none'),
+    r.raw_lang && !r.raw_lang_supported ? tr('tx_claim_unserved') : 'fasttext lid.176',
+    r.lang_source === 'service'));
+  box.append(claim('tx_claim_local', langLabel(r.local_lang),
+    r.script_lang ? tr('tx_claim_script', r.script_lang) : tr('tx_claim_words'),
+    r.lang_source === 'local'));
+  box.append(claim('tx_claim_final', langLabel(r.source_lang),
+    tr(r.lang_source === 'service' ? 'tx_claim_by_service' : 'tx_claim_by_local'), false));
+  box.append(claim('tx_claim_gate',
+    tr(r.gate_skips ? 'tx_gate_skip' : 'tx_gate_call'), tr('tx_gate_note'), false));
+  return box;
+}
+
+function txResultCard(test) {
+  const card = chartCard(tr('tx_result_title'),
+    tr('tx_tested_by', emoShortUser(test.user_id), fmtWhen(test.created_at)));
+  card.classList.add('emoresult');
+
+  card.append(el('p', 'emoresult__text', test.text));
+
+  if (test.error) {
+    card.append(el('p', 'analysis__fail', `${tr('tx_result_fail')} ${test.error}`));
+    card.append(txFeedbackForm(test));
+    return card;
+  }
+
+  const r = test.result || {};
+  card.append(txClaimRow(r));
+
+  // 三方说法一致与否，是这张卡最该一眼看到的结论。摆成一条横幅而不是让人自己
+  // 比对上面三格——语种判错和译文翻错要用完全不同的方式修，先分清是哪一种。
+  const disagreed = r.raw_lang && r.raw_lang !== r.source_lang;
+  const localDiff = r.local_lang && r.raw_lang && r.local_lang !== r.raw_lang;
+  if (disagreed || localDiff) {
+    const flag = el('div', 'txflag');
+    flag.append(el('span', 'txflag__k', tr('tx_flag_k')));
+    flag.append(el('p', 'txflag__d', disagreed
+      ? tr('tx_flag_overridden', langLabel(r.raw_lang), langLabel(r.source_lang))
+      : tr('tx_flag_split', langLabel(r.raw_lang), langLabel(r.local_lang))));
+    card.append(flag);
+  } else {
+    const flag = el('div', 'txflag is-ok');
+    flag.append(el('span', 'txflag__k', tr('tx_flag_k_ok')));
+    flag.append(el('p', 'txflag__d', tr('tx_flag_agree', langLabel(r.source_lang))));
+    card.append(flag);
+  }
+
+  const dl = el('dl', 'kv kv--fact');
+  kvRow(dl, tr('tx_latency'), test.latency_ms === null ? '—' : `${(test.latency_ms / 1000).toFixed(1)}s`);
+  kvRow(dl, tr('tx_chars_lbl'), test.char_count);
+  kvRow(dl, tr('tx_speed'), r.chars_per_s ? tr('tx_speed_v', r.chars_per_s) : '—');
+  kvRow(dl, tr('tx_paragraphs'), (r.paragraphs || []).length || 1);
+  card.append(dl);
+
+  card.append(el('div', 'panel__head panel__head--gap', tr('tx_out_title')));
+  card.append(el('div', 'txout', r.translated_text || ''));
+
+  if (test.suggested_translation) {
+    card.append(el('div', 'panel__head panel__head--gap', tr('tx_suggested_title')));
+    card.append(el('div', 'txout', test.suggested_translation));
+  }
+
+  const segs = r.segments || [];
+  if (segs.length) {
+    // 这张表存在的理由是那些和整封判定对不上的片。两种对不上要分开说：判成了别的
+    // 语种（LID 判错），和压根没给标签（服务端把不支持的语种压成 en 时就是这样，
+    // 说成"和整封一致"是不对的——它根本没判）。
+    const odd = segs.filter((s) => s.detected_language && s.detected_language !== r.raw_lang);
+    const blank = segs.filter((s) => !s.detected_language);
+    card.append(el('div', 'panel__head panel__head--gap', tr('tx_seg_title')));
+    card.append(el('p', 'emonote',
+      blank.length ? tr('tx_seg_none', blank.length)
+        : odd.length ? tr('tx_seg_odd', odd.length)
+          : tr('tx_seg_sub')));
+
+    const list = el('div', 'txseg');
+    for (const s of segs) {
+      const isOdd = !s.detected_language || s.detected_language !== r.raw_lang;
+      const row = el('div', 'txseg__row' + (isOdd ? ' is-odd' : ''));
+      const head = el('div', 'txseg__head');
+      head.append(el('span', null, tr('tx_seg_row', s.paragraph_index ?? '—', s.piece_index ?? '—')));
+      head.append(el('span', 'txseg__lang', s.detected_language || '—'));
+      if (s.used_language && s.used_language !== s.detected_language) {
+        head.append(el('span', null, tr('tx_seg_used', s.used_language)));
+      }
+      row.append(head);
+      row.append(el('p', 'txseg__src', s.text));
+      row.append(el('p', 'txseg__out', s.translation));
+      list.append(row);
+    }
+    card.append(list);
+  }
+
+  card.append(txFeedbackForm(test));
+  return card;
+}
+
+/* Two axes, both optional. The language picker is pre-loaded with what the
+   pipeline decided, so agreeing costs one click and disagreeing costs two — and
+   a disagreement is the only way the confusion table below ever gets a cell off
+   its diagonal. */
+function txFeedbackForm(test) {
+  const wrap = el('div', 'emofb');
+  wrap.append(el('div', 'panel__head', tr('tx_fb_title')));
+  wrap.append(el('p', 'emonote', tr('tx_fb_sub')));
+
+  const save = el('button', 'btn btn--primary', tr('tx_fb_save'));
+  save.type = 'button';
+
+  const suggested = el('textarea', 'emoinput emoinput--note txfb__suggested');
+  suggested.rows = 4;
+  suggested.maxLength = 4000;
+  suggested.placeholder = tr('tx_fb_suggested_ph');
+  suggested.value = test.suggested_translation || '';
+
+  const note = el('textarea', 'emoinput emoinput--note');
+  note.rows = 2;
+  note.maxLength = 400;
+  note.placeholder = tr('tx_fb_note_ph');
+  note.value = test.note || '';
+
+  const sync = () => {
+    save.disabled = !state.txVerdict && !state.txLang && !suggested.value.trim() && !note.value.trim();
+  };
+
+  // 轴一：译文本身好不好
+  wrap.append(el('p', 'emofb__hint', tr('tx_fb_quality')));
+  const verdictRow = el('div', 'emofb__verdicts');
+  for (const [value, key] of [['good', 'tx_fb_good'], ['bad', 'tx_fb_bad']]) {
+    const b = el('button',
+      `emofb__verdict is-${value === 'good' ? 'correct' : 'wrong'}` +
+      (state.txVerdict === value ? ' is-on' : ''));
+    b.type = 'button';
+    b.dataset.verdict = value;
+    b.textContent = tr(key);
+    b.addEventListener('click', () => {
+      // 再点一次同一个按钮 = 撤回对译文的评价
+      state.txVerdict = state.txVerdict === value ? null : value;
+      verdictRow.querySelectorAll('.emofb__verdict').forEach((n) => {
+        n.classList.toggle('is-on', n.dataset.verdict === state.txVerdict);
+      });
+      sync();
+    });
+    verdictRow.append(b);
+  }
+  wrap.append(verdictRow);
+
+  // 轴二：这段文字实际是什么语种。和译文质量完全独立——译文对、语种错是最常见的
+  // 一种组合，两轴合成一个"对/错"会把这种记录彻底抹掉。
+  wrap.append(el('p', 'emofb__hint', tr('tx_fb_lang')));
+  const picks = el('div', 'emofb__picks');
+  const codes = [...((state.txMeta.vocabulary || {}).tag_languages || [])];
+  for (const code of codes) {
+    const b = el('button', 'emopick' + (state.txLang === code ? ' is-on' : ''));
+    b.type = 'button';
+    b.dataset.lang = code;
+    b.append(el('span', null, `${code} · ${langLabel(code)}`));
+    b.addEventListener('click', () => {
+      state.txLang = state.txLang === code ? null : code;
+      picks.querySelectorAll('.emopick').forEach((n) => {
+        n.classList.toggle('is-on', n.dataset.lang === state.txLang);
+      });
+      sync();
+    });
+    picks.append(b);
+  }
+  wrap.append(picks);
+
+  wrap.append(el('p', 'emofb__hint', tr('tx_fb_suggested')));
+  wrap.append(suggested);
+  wrap.append(el('p', 'emonote', tr('tx_fb_suggested_hint')));
+
+  wrap.append(note);
+  note.addEventListener('input', sync);
+  suggested.addEventListener('input', sync);
+
+  const foot = el('div', 'emofb__foot');
+  if (test.verdict || test.true_lang) {
+    const bits = [];
+    if (test.verdict) bits.push(tr(test.verdict === 'good' ? 'tx_verdict_good' : 'tx_verdict_bad'));
+    if (test.true_lang) bits.push(tr('tx_fb_lang_saved', langLabel(test.true_lang)));
+    foot.append(el('span', 'emofb__saved',
+      `${bits.join(' · ')} · ${tr('tx_fb_by', emoShortUser(test.feedback_by), fmtWhen(test.feedback_at))}`));
+  }
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    save.textContent = tr('tx_fb_saving');
+    try {
+      const updated = await api(`/api/translation/tests/${test.id}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verdict: state.txVerdict,
+          true_lang: state.txLang,
+          suggested_translation: suggested.value,
+          note: note.value,
+        }),
+      });
+      state.txOpen = updated;
+      toast(tr('tx_fb_saved'));
+      await refreshTranslation();
+    } catch (err) {
+      toast(err.message, 5000);
+      save.disabled = false;
+      save.textContent = tr('tx_fb_save');
+    }
+  });
+  foot.append(save);
+  wrap.append(foot);
+
+  sync();
+  return wrap;
+}
+
+/* ------------------------------------------------------- sub-page: log --- */
+
+/* Detected x actual. Language is nominal, so it gets a table and not a chart —
+   the same call the tag analytics page makes. The diagonal is agreement; a cell
+   off it is one email whose reply went out in the wrong language. */
+function txConfusionTable(stats, vocab) {
+  const rows = vocab.filter((l) => stats.confusion[l]);
+  if (!rows.length) return null;
+  const cols = vocab.filter((c) => rows.some((r) => (stats.confusion[r] || {})[c]));
+
+  const card = chartCard(tr('tx_table_confusion'), tr('tx_table_confusion_sub'));
+  const table = el('table', 'dtable dtable--cross');
+  const thead = el('thead');
+  const hr = el('tr');
+  hr.append(el('th', null, tr('tx_th_detected')));
+  for (const c of cols) hr.append(el('th', 'dtable__num', langLabel(c)));
+  hr.append(el('th', 'dtable__num', tr('th_total')));
+  thead.append(hr);
+  table.append(thead);
+
+  const peak = Math.max(...rows.flatMap((r) => Object.values(stats.confusion[r] || {})));
+  const tbody = el('tbody');
+  for (const r of rows) {
+    const line = stats.confusion[r] || {};
+    const tr_ = el('tr');
+    tr_.append(el('td', null, langLabel(r)));
+    for (const c of cols) {
+      const n = line[c] || 0;
+      const cell = el('td', 'dtable__num', n ? String(n) : '·');
+      if (n && r !== c) cell.style.background = `rgba(239,106,82,${0.06 + 0.18 * (n / peak)})`;
+      if (n && r === c) cell.classList.add('is-diagonal');
+      tr_.append(cell);
+    }
+    tr_.append(el('td', 'dtable__num dtable__rowtotal',
+      String(Object.values(line).reduce((a, b) => a + b, 0))));
+    tbody.append(tr_);
+  }
+  table.append(tbody);
+  card.append(table);
+  return card;
+}
+
+function txRecordsCard() {
+  const card = chartCard(tr('tx_records_title'), tr('tx_records_sub'));
+  if (!state.txTests.length) {
+    card.append(el('p', 'list__empty', tr('tx_records_empty')));
+    return card;
+  }
+  const list = el('div', 'emolog');
+  for (const t of state.txTests) {
+    const row = el('button', 'emolog__row' + (state.txOpen && state.txOpen.id === t.id ? ' is-on' : ''));
+    row.type = 'button';
+
+    const top = el('div', 'emolog__top');
+    // 语种是标称量，不配色标——直接把码写出来，比一个要查图例的色点清楚
+    top.append(el('code', 'emofield', t.source_lang || '—'));
+    top.append(el('span', 'emolog__pred', t.error ? tr('tx_kpi_failed') : langLabel(t.source_lang)));
+    if (t.latency_ms) top.append(el('span', 'emolog__score', `${(t.latency_ms / 1000).toFixed(1)}s`));
+
+    const badge = el('span', `emolog__verdict is-${t.verdict === 'good' ? 'correct' : t.verdict === 'bad' ? 'wrong' : 'none'}`);
+    badge.textContent = t.verdict
+      ? tr(t.verdict === 'good' ? 'tx_verdict_good' : 'tx_verdict_bad')
+      : tr('tx_no_verdict');
+    top.append(badge);
+    row.append(top);
+
+    row.append(el('p', 'emolog__text', t.text));
+
+    const meta = el('div', 'emolog__meta');
+    meta.append(el('span', null, `${emoShortUser(t.user_id)} · ${fmtWhen(t.created_at)}`));
+    // 人给的真实语种和链路判定不一致时才值得占一行——一致的话这行是废话
+    if (t.true_lang && t.true_lang !== t.source_lang) {
+      meta.append(el('span', 'emolog__true', `→ ${langLabel(t.true_lang)}`));
+    }
+    if (t.suggested_translation) {
+      meta.append(el('span', 'emolog__true', tr('tx_suggested_short')));
+    }
+    row.append(meta);
+
+    row.addEventListener('click', () => openTranslationTest(t));
+    list.append(row);
+  }
+  card.append(list);
+  return card;
+}
+
+/* Opening a test always lands on the bench: the result card and the feedback
+   form are the same card, so judging a row means going to where the form is. */
+function openTranslationTest(test) {
+  state.txOpen = test;
+  state.txTab = 'bench';
+  state.txVerdict = test.verdict || null;
+  // 语种没人评过的话，预填链路自己的判定：同意只要点保存，不同意才要改
+  state.txLang = test.true_lang || test.source_lang || null;
+  const url = new URL(location.href);
+  url.searchParams.set('view', 'translation');
+  url.searchParams.set('tab', 'bench');
+  url.searchParams.set('tx', test.id);
+  history.replaceState(null, '', url);
+  renderTranslationView();
+  const card = document.querySelector('#translation-body .emoresult');
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function renderTranslationView() {
+  const box = $('#translation-body');
+  const tab = state.txTab;
+  box.innerHTML = '';
+
+  document.querySelectorAll('#tx-tabs button').forEach((b) => {
+    const on = b.dataset.txtab === tab;
+    b.classList.toggle('is-on', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  $('#tx-scope').hidden = tab !== 'log';
+  document.querySelectorAll('#tx-scope button').forEach((b) => {
+    b.classList.toggle('is-on', b.dataset.txscope === state.txScope);
+  });
+  $('#tx-view-desc').textContent = tr(`tx_desc_${tab}`);
+
+  const meta = state.txMeta;
+  if (!meta) return;
+  // 端点没配好只影响"跑一段"；管线和语种词表是本地常量，照样讲得清楚
+  if (!meta.enabled && (tab === 'bench' || tab === 'model')) {
+    box.append(el('p', 'analysis__fail', tr('tx_off')));
+  }
+
+  if (tab === 'model') {
+    box.append(txHeroCard(meta));
+    box.append(txDeployCard(meta));
+    box.append(txSpecCard(meta));
+    for (const build of [txFamilyCard, txVendorCard, txCostCard]) {
+      const card = build(meta);
+      if (card) box.append(card);
+    }
+    return;
+  }
+
+  if (tab === 'pipeline') {
+    for (const build of [txPipelineCard, txContractCard, txKnownCard]) {
+      const card = build(meta);
+      if (card) box.append(card);
+    }
+    return;
+  }
+
+  if (tab === 'langs') {
+    for (const build of [txLangsCard, txReplyCard, txDownstreamCard]) {
+      const card = build(meta);
+      if (card) box.append(card);
+    }
+    return;
+  }
+
+  if (tab === 'bench') {
+    box.append(txBenchCard(meta));
+    // 结果卡和"最近跑过什么"二选一：有结果时看结果，没有时看别人刚试了什么，
+    // 而不是留半屏空白
+    if (state.txOpen) box.append(txResultCard(state.txOpen));
+    else box.append(txRecentCard());
+    return;
+  }
+
+  const s = state.txStats;
+  if (s && s.total) {
+    const kpis = el('div', 'statrow');
+    kpis.append(statTile(tr('tx_kpi_tests'), String(s.total), tr('tx_kpi_tests_sub', s.testers)));
+    kpis.append(statTile(tr('tx_kpi_quality'),
+      s.quality === null ? '—' : `${Math.round(s.quality * 100)}%`,
+      tr('tx_kpi_quality_sub', s.reviewed)));
+    kpis.append(statTile(tr('tx_kpi_lang'),
+      s.lang_accuracy === null ? '—' : `${Math.round(s.lang_accuracy * 100)}%`,
+      tr('tx_kpi_lang_sub', s.lang_judged)));
+    kpis.append(statTile(tr('tx_kpi_speed'),
+      s.avg_latency_ms === null ? '—' : `${(s.avg_latency_ms / 1000).toFixed(1)}s`,
+      s.chars_per_s ? tr('tx_kpi_speed_sub', s.chars_per_s) : tr('tx_kpi_speed_none')));
+    if (s.failed) kpis.append(statTile(tr('tx_kpi_failed'), String(s.failed), tr('tx_kpi_failed_sub')));
+    box.append(kpis);
+
+    const charts = el('div', 'vizgrid');
+    const left = el('div', 'vizgrid__col');
+    const right = el('div', 'vizgrid__col');
+
+    const verdictChart = distributionChart(
+      tr('tx_chart_feedback'),
+      tr('tx_chart_feedback_sub'),
+      { good: s.good, bad: s.bad },
+      s.reviewed,
+      (value) => tr(value === 'good' ? 'tx_verdict_good' : 'tx_verdict_bad'),
+      (value) => (value === 'good' ? VIZ.sentiment.satisfied : VIZ.sentiment.hostile),
+      ['good', 'bad'],
+    );
+    if (verdictChart) left.append(verdictChart);
+
+    const latencyChart = distributionChart(
+      tr('tx_chart_latency'),
+      tr('tx_chart_latency_sub'),
+      s.latency_buckets || {},
+      Object.values(s.latency_buckets || {}).reduce((a, b) => a + b, 0),
+      (value) => tr(`tx_latency_bin_${value}`),
+      (value) => ({
+        under_5s: VIZ.sentiment.satisfied,
+        under_15s: VIZ.intentBar,
+        under_30s: VIZ.urgency[2],
+        over_30s: VIZ.sentiment.hostile,
+      }[value] || VIZ.intentBar),
+      ['under_5s', 'under_15s', 'under_30s', 'over_30s'],
+    );
+    if (latencyChart) left.append(latencyChart);
+
+    const detectedChart = distributionChart(
+      tr('tx_chart_language'),
+      tr('tx_chart_language_sub'),
+      s.detected || {},
+      Object.values(s.detected || {}).reduce((a, b) => a + b, 0),
+      (value) => langLabel(value),
+      VIZ.intentBar,
+    );
+    if (detectedChart) right.append(detectedChart);
+
+    const truthChart = distributionChart(
+      tr('tx_chart_truth'),
+      tr('tx_chart_truth_sub'),
+      s.truth || {},
+      Object.values(s.truth || {}).reduce((a, b) => a + b, 0),
+      (value) => langLabel(value),
+      VIZ.urgency[3],
+    );
+    if (truthChart) right.append(truthChart);
+
+    if (left.childNodes.length || right.childNodes.length) {
+      charts.append(left, right);
+      box.append(charts);
+    }
+
+    const vocab = s.vocabulary || [];
+    const detected = breakdownTable('tx_table_detected', 'language', vocab, s.detected,
+      Object.values(s.detected).reduce((a, b) => a + b, 0), 'tx_th_tests');
+    if (detected) box.append(detected);
+    const confusion = txConfusionTable(s, vocab);
+    if (confusion) box.append(confusion);
+  }
+
+  box.append(txRecordsCard());
+}
+
+async function runTranslationTest(text, sampleId) {
+  const body = (text || '').trim();
+  if (!body || state.txBusy) return;
+  state.txBusy = true;
+  renderTranslationView();
+  try {
+    const test = await api('/api/translation/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: body, sample_id: sampleId }),
+    });
+    state.txBusy = false;
+    openTranslationTest(test);
+    await refreshTranslation();
+  } catch (err) {
+    state.txBusy = false;
+    toast(tr('tx_toast_test_fail', err.message), 5000);
+    renderTranslationView();
+  }
+}
+
+async function loadTranslationMeta() {
+  if (state.txMeta) return;
+  try {
+    state.txMeta = await api('/api/translation/meta');
+  } catch {
+    state.txMeta = null;
+  }
+}
+
+async function refreshTranslation() {
+  try {
+    const [tests, stats] = await Promise.all([
+      api(`/api/translation/tests?scope=${state.txScope}&limit=200`),
+      api(`/api/translation/stats?scope=${state.txScope}`),
+    ]);
+    state.txTests = tests.tests;
+    state.txStats = stats;
+    $('#count-translation').textContent = stats.total;
+    // 记录列表刷新后，结果卡跟着换成同一条的最新版本（别人可能刚改过评价）
+    if (state.txOpen) {
+      const fresh = tests.tests.find((t) => t.id === state.txOpen.id);
+      if (fresh) state.txOpen = fresh;
+    }
+  } catch (err) {
+    toast(err.message, 5000);
+  }
+  if (state.view === 'translation') renderTranslationView();
+}
+
 /* -------------------------------------------------------------- send ---- */
 
 async function sendMail() {
@@ -3861,6 +5824,17 @@ document.querySelectorAll('#emo-scope button').forEach((btn) => {
   btn.addEventListener('click', () => {
     state.emoScope = btn.dataset.emoscope;
     refreshEmotion();
+  });
+});
+
+document.querySelectorAll('#tx-tabs button').forEach((btn) => {
+  btn.addEventListener('click', () => setTxTab(btn.dataset.txtab));
+});
+
+document.querySelectorAll('#tx-scope button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.txScope = btn.dataset.txscope;
+    refreshTranslation();
   });
 });
 
