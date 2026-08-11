@@ -132,6 +132,23 @@ def init() -> None:
         for column, decl in _ADDED_TX_COLUMNS.items():
             if column not in existing_tx:
                 conn.execute(f"ALTER TABLE translation_tests ADD COLUMN {column} {decl}")
+        _warn_if_corrupt(conn)
+
+
+def _warn_if_corrupt(conn: sqlite3.Connection) -> None:
+    """坏页不会挡住启动——建表、写入都照常，直到某个请求正好扫到它才炸。
+    启动时先敲一下，让"库坏了"在服务起来的那一刻就写在日志里，而不是等用户
+    点开列表看到 500。只报警不拦启动：库坏了也还有一大半数据能读。"""
+    try:
+        # row_factory 是 sqlite3.Row，取出来的不是 tuple，只能按下标读第一列。
+        report = [str(row[0]) for row in conn.execute("PRAGMA quick_check")]
+    except sqlite3.DatabaseError as exc:
+        report = [str(exc)]
+    if report == ["ok"]:
+        return
+    detail = "; ".join(report[:3])
+    print(f"[store] 数据库自检没过：{detail}")
+    print(f"[store] 停掉服务后跑 python repair_db.py 重建（原库会留一份备份）：{DB_PATH}")
 
 
 def user_id_for_ip(ip: str) -> str:

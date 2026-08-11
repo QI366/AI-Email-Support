@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 import time
 from datetime import date
@@ -79,6 +80,19 @@ MAX_TRANSLATION_TEXT = 600
 
 app = FastAPI(title="Helios Support Mailbox", version="1.0.0")
 store.init()
+
+
+# 库文件本身坏掉时（某些页读不回来）SQLite 抛的是 DatabaseError，它和请求参数、
+# 业务分支都没关系——每个接口各自 try 一遍纯属噪音。统一在这里翻成 503 加一句
+# 照着做就行的提示：一条 "database disk image is malformed" 的 500 traceback
+# 看不出该修什么，这条能。
+@app.exception_handler(sqlite3.DatabaseError)
+async def _database_broken(request: Request, exc: sqlite3.DatabaseError) -> JSONResponse:
+    print(f"[db] {request.url.path} -> {exc}")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"邮箱数据库读不动了（{exc}）。停掉服务后跑 python repair_db.py 重建。"},
+    )
 
 
 # --------------------------------------------------------------------------
